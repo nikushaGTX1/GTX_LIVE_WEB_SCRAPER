@@ -18,6 +18,7 @@ const SS_CSV_PATH = path.join(DATA_ROOT, 'ss-apartments.csv');
 const DASHBOARD_PATH = path.join(DATA_ROOT, 'live-results.html');
 const STATE_PATH = path.join(DATA_ROOT, 'watcher-state.json');
 const PROFILE_PATH = process.env.WATCHER_PROFILE || path.join(DATA_ROOT, '.browser-profile');
+const IS_HOSTED = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID);
 
 const FIELDS = [
   'apartment_id', 'title', 'phone', 'price', 'rooms', 'bedrooms', 'area_m2',
@@ -221,13 +222,12 @@ function startWebServer() {
 }
 
 async function launchBrowserContext(options) {
-  const hosted = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID);
   const common = {
-    headless: hosted || options.headless,
+    headless: IS_HOSTED || options.headless,
     viewport: { width: 1440, height: 900 },
     locale: 'ka-GE'
   };
-  if (hosted) return chromium.launchPersistentContext(PROFILE_PATH, common);
+  if (IS_HOSTED) return chromium.launchPersistentContext(PROFILE_PATH, common);
   try {
     return await chromium.launchPersistentContext(PROFILE_PATH, { ...common, channel: 'chrome' });
   } catch (error) {
@@ -534,10 +534,18 @@ async function extractDetail(page, card) {
     const correctUrl = myHomeUrl(source, card.id);
     let phone = normalizePhone(source.comment || '');
     if (!phone) {
-      await page.goto(correctUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
-      await waitThroughChallenge(page);
-      await page.waitForTimeout(750);
-      phone = await extractPhone(page);
+      if (IS_HOSTED) {
+        // MyHome presents an interactive Cloudflare challenge to Railway's
+        // datacenter browser. There is no person or visible window to solve it,
+        // so preserve the new listing immediately instead of blocking scans for
+        // three minutes and rediscovering the same ID on the next cycle.
+        console.log(`MyHome phone for ID ${card.id} is hidden behind the hosted security check; saving the listing without it.`);
+      } else {
+        await page.goto(correctUrl, { waitUntil: 'domcontentloaded', timeout: 90000 });
+        await waitThroughChallenge(page);
+        await page.waitForTimeout(750);
+        phone = await extractPhone(page);
+      }
     }
     return myHomeApartment(source, card.id, phone);
   }
@@ -791,7 +799,7 @@ async function main() {
   try {
     context = await launchBrowserContext(options);
     writeDashboard();
-    if (!process.env.RAILWAY_ENVIRONMENT && !process.env.RAILWAY_PROJECT_ID) {
+    if (!IS_HOSTED) {
       const dashboardPage = context.pages()[0] || await context.newPage();
       await dashboardPage.goto(pathToFileURL(DASHBOARD_PATH).href);
     }
