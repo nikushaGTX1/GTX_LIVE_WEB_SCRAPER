@@ -1,0 +1,11 @@
+node_modules/
+.npm-cache/
+.browser-profile/
+apartments.json
+apartments.csv
+watcher-state.json
+ss-apartments.json
+ss-apartments.csv
+live-results.html
+.ss-debug-profile/
+*.tmp

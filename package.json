@@ -1,0 +1,14 @@
+{
+  "name": "myhome-new-apartment-watcher",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Watch a MyHome.ge search for new apartment listings",
+  "main": "main.js",
+  "scripts": {
+    "start": "node main.js",
+    "check": "node --check main.js"
+  },
+  "dependencies": {
+    "playwright": "1.62.0"
+  }
+}
