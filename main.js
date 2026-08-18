@@ -20,6 +20,25 @@ const STATE_PATH = path.join(DATA_ROOT, 'watcher-state.json');
 const PROFILE_PATH = process.env.WATCHER_PROFILE || path.join(DATA_ROOT, '.browser-profile');
 const IS_HOSTED = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID);
 
+const EXCLUDED_DESCRIPTION_PHRASES = [
+  'აგენტებმა არ დამირეკოთ',
+  'agentebma ar damirekot',
+  'აგენტებმა არ დარეკოთ',
+  'agentebma ar darekot',
+  'არანაირი შემოთავაზებით',
+  'aranairi shemotavazebit',
+  'ვარ აგენტი',
+  'var agenti',
+  'მაკლერებმა არ დარეკოთ',
+  'maklerebma ar darekot',
+  'არანაირი პირობით',
+  'aranairi pirobit',
+  'თავი შეიკავეთ',
+  'tavi sheikavet',
+  'აგენტებთან არ ვთანამშრომლობ',
+  'agentebtan ar vtanamshromlob'
+];
+
 const FIELDS = [
   'apartment_id', 'title', 'phone', 'price', 'rooms', 'bedrooms', 'area_m2',
   'floor', 'total_floors', 'address', 'posted', 'description', 'url', 'first_seen'
@@ -40,6 +59,27 @@ let ssAuthToken = '';
 
 function clean(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
+}
+
+function normalizedDescription(value) {
+  return clean(value).normalize('NFKC').toLocaleLowerCase('ka-GE');
+}
+
+function hasExcludedDescription(value) {
+  const description = normalizedDescription(value);
+  return EXCLUDED_DESCRIPTION_PHRASES.some(phrase => description.includes(phrase));
+}
+
+function markExcludedDescriptions(data) {
+  let count = 0;
+  for (const item of Object.values(data)) {
+    if (hasExcludedDescription(item.description)) {
+      item._baseline = true;
+      item._excluded = true;
+      count += 1;
+    }
+  }
+  return count;
 }
 
 function match(pattern, text, group = 1) {
@@ -144,7 +184,7 @@ function writeDashboard() {
   const combined = [
     ...Object.values(readJsonFile(DATA_PATH)).map(item => ({ ...item, source: item.source || 'MyHome' })),
     ...Object.values(readJsonFile(SS_DATA_PATH)).map(item => ({ ...item, source: 'SS.ge' }))
-  ].filter(item => !item._baseline)
+  ].filter(item => !item._baseline && !item._excluded && !hasExcludedDescription(item.description))
     .sort((a, b) => String(b.first_seen).localeCompare(String(a.first_seen)));
 
   const rows = combined.map(item => `<tr>
@@ -242,7 +282,7 @@ function saveData(data, dataPath = DATA_PATH, csvPath = CSV_PATH) {
   fs.renameSync(tempPath, dataPath);
 
   const rows = Object.values(data)
-    .filter(row => !row._baseline)
+    .filter(row => !row._baseline && !row._excluded && !hasExcludedDescription(row.description))
     .sort((a, b) => String(b.first_seen).localeCompare(String(a.first_seen)));
   const csv = [FIELDS.map(csvCell).join(',')];
   for (const row of rows) csv.push(FIELDS.map(field => csvCell(row[field])).join(','));
@@ -700,6 +740,14 @@ async function scan(context, data, state, options) {
     for (const card of newest.reverse()) {
       try {
         const item = await extractDetail(detailPage, card);
+        if (hasExcludedDescription(item.description)) {
+          item._baseline = true;
+          item._excluded = true;
+          data[item.apartment_id] = item;
+          saveData(data);
+          console.log(`FILTERED MyHome ID ${item.apartment_id} because its description contains an excluded phrase.`);
+          continue;
+        }
         item._baseline = false;
         data[item.apartment_id] = item;
         saveData(data);
@@ -759,6 +807,14 @@ async function scanSs(context, data, state) {
     for (const card of newest.reverse()) {
       try {
         const item = await extractSsDetail(detailPage, card);
+        if (hasExcludedDescription(item.description)) {
+          item._baseline = true;
+          item._excluded = true;
+          data[item.apartment_id] = item;
+          saveData(data, SS_DATA_PATH, SS_CSV_PATH);
+          console.log(`FILTERED SS.ge ID ${item.apartment_id} because its description contains an excluded phrase.`);
+          continue;
+        }
         item._baseline = false;
         data[item.apartment_id] = item;
         saveData(data, SS_DATA_PATH, SS_CSV_PATH);
@@ -788,6 +844,13 @@ async function main() {
     state.initialized_at = new Date().toISOString();
     saveData(data);
     saveState(state);
+  }
+  const excludedMyHome = markExcludedDescriptions(data);
+  const excludedSs = markExcludedDescriptions(ssData);
+  saveData(data);
+  saveData(ssData, SS_DATA_PATH, SS_CSV_PATH);
+  if (excludedMyHome + excludedSs) {
+    console.log(`Filtered ${excludedMyHome + excludedSs} existing listing(s) by description.`);
   }
   console.log(`Saving results to ${CSV_PATH}`);
   console.log(`Saving SS.ge results to ${SS_CSV_PATH}`);
