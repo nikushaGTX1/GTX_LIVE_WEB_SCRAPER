@@ -105,7 +105,9 @@
         const response = await fetch('/api/apartments/accepted-links');
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'Could not load accepted links');
-        const text = result.links.join('\n');
+        const text = result.entries
+          .map(entry => `${entry.link}\nComment: ${entry.comment || ''}`)
+          .join('\n\n');
         if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
         else {
           const helper = document.createElement('textarea');
@@ -115,7 +117,7 @@
           document.execCommand('copy');
           helper.remove();
         }
-        button.textContent = `Copied ${result.links.length} link(s)`;
+        button.textContent = `Copied ${result.entries.length} apartment(s)`;
         setTimeout(() => { button.textContent = 'Copy accepted links'; }, 1800);
       } catch (error) {
         alert(error.message);

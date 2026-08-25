@@ -212,12 +212,15 @@ function buildDashboard(viewer = null, view = 'all') {
   if (view === 'accepted' || viewer?.role === 'manager') {
     combined = combined.filter(item => item._review_status === 'accepted');
   }
+  const showManagementComments = ['admin', 'manager'].includes(viewer?.role) &&
+    (view === 'accepted' || viewer?.role === 'manager');
 
   const rows = combined.map(item => `<tr data-apartment-id="${html(item.apartment_id)}" data-district="${html(item.district || 'Other')}" class="apartment-row ${item._review_status === 'accepted' ? 'review-accepted' : ''}">
     <td><span class="source ${item.source === 'SS.ge' ? 'ss' : ''}">${html(item.source)}</span></td>
     <td>${html(item.district || 'Other')}</td>
     <td>${html(item.assigned_agent_name || item.assigned_agent_id || 'Pending')}</td>
     <td><a class="listing-link" href="${html(item.url)}" target="_blank" rel="noopener noreferrer">Open listing ↗</a></td>
+    ${showManagementComments ? `<td class="management-comment"><strong>${html(item._review_comment || 'No comment')}</strong><small>${item._reviewed_by ? `By ${html(item._reviewed_by)}` : ''}${item._reviewed_at ? ` · ${html(item._reviewed_at)}` : ''}</small></td>` : ''}
     <td class="review-cell">
       <div class="review-buttons">
         <button class="review-button accept-button" type="button" title="Accept and comment" aria-label="Accept apartment">✓</button>
@@ -226,7 +229,7 @@ function buildDashboard(viewer = null, view = 'all') {
     </td>
   </tr>
   <tr class="comment-row" data-apartment-id="${html(item.apartment_id)}" data-comment-for="${html(item.apartment_id)}" data-district="${html(item.district || 'Other')}" hidden>
-    <td colspan="5">
+    <td colspan="${showManagementComments ? 6 : 5}">
       <div class="comment-dropdown">
         <textarea class="review-comment" rows="3" placeholder="Type a comment…">${html(item._review_comment || '')}</textarea>
         <div class="review-audit">${item._reviewed_by ? `Accepted by ${html(item._reviewed_by)}${item._reviewed_at ? ` · ${html(item._reviewed_at)}` : ''}` : ''}</div>
@@ -239,7 +242,7 @@ function buildDashboard(viewer = null, view = 'all') {
     throw new Error(`Dashboard template is missing: ${DASHBOARD_TEMPLATE_PATH}`);
   }
   const content = combined.length
-    ? `<table><thead><tr><th>Source</th><th>District</th><th>Assigned agent</th><th>Link</th><th>Review</th></tr></thead><tbody>${rows}</tbody></table>`
+    ? `<table><thead><tr><th>Source</th><th>District</th><th>Assigned agent</th><th>Link</th>${showManagementComments ? '<th>Comment</th>' : ''}<th>Review</th></tr></thead><tbody>${rows}</tbody></table>`
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
     .replace('{{LISTING_COUNT}}', String(combined.length))
@@ -505,9 +508,9 @@ function startWebServer() {
       const accepted = [...Object.values(liveMyHomeData || {}), ...Object.values(liveSsData || {})]
         .filter(item => item._review_status === 'accepted' && item.url)
         .sort((a, b) => String(a._reviewed_at || '').localeCompare(String(b._reviewed_at || '')));
-      const links = [...new Set(accepted.map(item => item.url))];
+      const entries = accepted.map(item => ({ link: item.url, comment: item._review_comment || '' }));
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-      response.end(JSON.stringify({ links }));
+      response.end(JSON.stringify({ entries }));
       return;
     }
     if ((pathname === '/' || pathname === '/live-results.html') && request.method === 'GET') {
