@@ -118,7 +118,20 @@
       const searchList = document.getElementById('active-searches');
       searchList.replaceChildren(...config.searches.map(search => {
         const badge = document.createElement('span');
-        badge.textContent = search.district;
+        const label = document.createElement('span');
+        label.textContent = search.district;
+        const remove = document.createElement('button');
+        remove.type = 'button';
+        remove.className = 'remove-search';
+        remove.setAttribute('aria-label', `Remove ${search.district} search`);
+        remove.title = 'Remove this search link';
+        remove.textContent = '×';
+        remove.addEventListener('click', () => {
+          if (!confirm(`Remove the ${search.district} MyHome search?`)) return;
+          saveWatcherConfig({ removeUrl: search.url })
+            .catch(error => { message.textContent = error.message; });
+        });
+        badge.append(label, remove);
         return badge;
       }));
       showWatcherStatus(config.status);

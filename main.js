@@ -297,6 +297,18 @@ async function updateWatcherConfig(request, response) {
       if (existing) Object.assign(existing, { district, url });
       else watcherRuntime.searches.push({ district, url });
     }
+    if (body.removeUrl) {
+      const removeUrl = validateMyHomeUrl(body.removeUrl);
+      const canonical = searchKey(removeUrl, watcherRuntime.pages).split('|pages=')[0];
+      watcherRuntime.searches = watcherRuntime.searches.filter(search =>
+        searchKey(search.url, watcherRuntime.pages).split('|pages=')[0] !== canonical
+      );
+      watcherRuntime.enabled = false;
+      watcherStatus.state = watcherRuntime.searches.length ? 'stopping' : 'paused';
+      watcherStatus.message = watcherRuntime.searches.length
+        ? 'Search removed. Stopping the active queue safely…'
+        : 'No MyHome search links configured.';
+    }
     saveWatcherConfig(watcherRuntime);
     response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
     response.end(JSON.stringify(publicWatcherConfig()));
@@ -446,7 +458,7 @@ function loadWatcherConfig(options) {
     enabled: saved?.enabled !== false,
     pages: Number.isInteger(saved?.pages) && saved.pages >= 1 && saved.pages <= 10 ? saved.pages : options.pages,
     interval: Number.isFinite(saved?.interval) && saved.interval >= 3 ? saved.interval : options.interval,
-    searches: Array.isArray(saved?.searches) && saved.searches.length ? saved.searches : options.searches
+    searches: Array.isArray(saved?.searches) ? saved.searches : options.searches
   };
   config.searches = config.searches.map(search => ({
     district: clean(search.district) || districtNameFromUrl(search.url),

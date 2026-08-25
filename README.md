@@ -36,6 +36,9 @@ successful completion time, pause state, and the latest scraper error.
 The Stop button safely ends an active import after its current apartment, retains
 all completed work, leaves remaining IDs ready for the next Start, and pauses the
 dashboard's three-second page refresh until scraping is started again.
+Each active search badge has a remove button. Removing the final link pauses the
+scraper; an empty saved search list stays empty after restarts until an admin
+pastes and saves another filtered MyHome URL.
 
 ## Start
 

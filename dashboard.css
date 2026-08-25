@@ -191,7 +191,33 @@ h1 {
 .status-stats { grid-column: 2; display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: 12px; }
 .status-error { grid-column: 1 / -1; margin: 0; color: #b42318; font-size: 12px; }
 .active-searches { display: flex; flex-wrap: wrap; gap: 6px; }
-.active-searches span { padding: 4px 8px; border-radius: 999px; background: var(--header); color: var(--muted); font-size: 11px; }
+.active-searches > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 5px 4px 9px;
+  border-radius: 999px;
+  background: var(--header);
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.remove-search {
+  display: grid;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #718096;
+  cursor: pointer;
+  font-size: 17px;
+  line-height: 1;
+  place-items: center;
+}
+
+.remove-search:hover { background: #d9e3ef; color: #b42318; }
 
 .district-filters {
   display: flex;
