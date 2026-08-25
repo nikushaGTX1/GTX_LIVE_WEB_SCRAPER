@@ -24,6 +24,7 @@ const SS_CSV_PATH = path.join(DATA_ROOT, 'ss-apartments.csv');
 const DASHBOARD_PATH = path.join(DATA_ROOT, 'live-results.html');
 const DASHBOARD_TEMPLATE_PATH = path.join(ROOT, 'dashboard.html');
 const DASHBOARD_CSS_PATH = path.join(ROOT, 'dashboard.css');
+const FAVICON_PATH = path.join(ROOT, 'favicon.svg');
 const STATE_PATH = path.join(DATA_ROOT, 'watcher-state.json');
 const WATCHER_CONFIG_PATH = path.join(DATA_ROOT, 'watcher-config.json');
 const PROFILE_PATH = process.env.WATCHER_PROFILE || path.join(DATA_ROOT, '.browser-profile');
@@ -314,6 +315,8 @@ function startWebServer() {
       '/': [DASHBOARD_PATH, 'text/html; charset=utf-8'],
       '/live-results.html': [DASHBOARD_PATH, 'text/html; charset=utf-8'],
       '/dashboard.css': [DASHBOARD_CSS_PATH, 'text/css; charset=utf-8'],
+      '/favicon.svg': [FAVICON_PATH, 'image/svg+xml'],
+      '/favicon.ico': [FAVICON_PATH, 'image/svg+xml'],
       '/apartments.csv': [CSV_PATH, 'text/csv; charset=utf-8'],
       '/ss-apartments.csv': [SS_CSV_PATH, 'text/csv; charset=utf-8']
     };
@@ -953,34 +956,20 @@ async function scan(context, data, state, options) {
   const activeSearchKey = options.searches
     .map(search => `${search.district}:${searchKey(search.url, options.pages)}`)
     .sort().join('||');
-  if (!state.initialized || state.engine_version !== 3 || state.myhome_search_key !== activeSearchKey) {
-    for (const card of cards) {
-      if (!data[card.id]) {
-        data[card.id] = {
-          apartment_id: card.id,
-          district: card.district,
-          url: card.url,
-          first_seen: new Date().toISOString(),
-          _baseline: true
-        };
-      }
-    }
+  if (!state.initialized || state.engine_version !== 4 || state.myhome_search_key !== activeSearchKey) {
     state.initialized = true;
-    state.engine_version = 3;
+    state.engine_version = 4;
     state.myhome_search_key = activeSearchKey;
     state.initialized_at = new Date().toISOString();
-    saveData(data);
     saveState(state);
-    console.log(`Baseline ready with ${byId.size} current IDs from ${options.searches.length} district(s), ${options.pages} page(s) each. Waiting for newer uploads.`);
-    return 0;
+    console.log(`Search configured for ${byId.size} current listings from ${options.searches.length} district(s), ${options.pages} page(s) each. Importing the complete result set.`);
   }
 
-  const unseen = cards.filter(card => !data[card.id]);
-  // quantity_of_day is the age of the original listing. VIP renewals can update
-  // last_updated, but they retain a non-zero age and are therefore not "new".
-  const newest = unseen.filter(card => Number(card.api.quantity_of_day) === 0);
-  const skippedOld = unseen.length - newest.length;
-  console.log(`Checked ${byId.size} listings across all priority tiers; ${newest.length} are genuinely new.`);
+  const toImport = cards.filter(card => {
+    const saved = data[card.id];
+    return !saved || (saved._baseline && !saved._excluded && !saved.title);
+  });
+  console.log(`Checked ${byId.size} listings across the configured pages; ${toImport.length} still need importing.`);
 
   const repairs = cards.filter(card => {
     const saved = data[card.id];
@@ -998,29 +987,17 @@ async function scan(context, data, state, options) {
       console.error(`Could not repair MyHome ID ${card.id}: ${error.message}`);
     }
   }
-  if (skippedOld) console.log(`Ignored ${skippedOld} unseen promoted/older listing(s).`);
-  // Remember ignored IDs so pinned ads are not reconsidered every two minutes.
-  for (const card of unseen.filter(card => Number(card.api.quantity_of_day) !== 0)) {
-    data[card.id] = {
-      apartment_id: card.id,
-      district: card.district,
-      url: card.url,
-      first_seen: new Date().toISOString(),
-      _baseline: true
-    };
-  }
-  if (skippedOld) saveData(data);
   try {
     await syncPendingWebsiteApartments(data, state);
   } catch (error) {
     console.error(`Website API synchronization failed: ${error.message}`);
   }
-  if (!newest.length) return 0;
+  if (!toImport.length) return 0;
 
   const detailPage = await context.newPage();
   let saved = 0;
   try {
-    for (const card of newest.reverse()) {
+    for (const card of toImport.reverse()) {
       try {
         const item = await extractDetail(detailPage, card);
         if (hasExcludedDescription(item.description)) {
@@ -1139,7 +1116,7 @@ async function main() {
   console.log(process.env.WEBSITE_API_EMAIL && process.env.WEBSITE_API_PASSWORD
     ? `Website API upload enabled at ${WEBSITE_API_URL}.`
     : 'Website API upload disabled; set WEBSITE_API_EMAIL and WEBSITE_API_PASSWORD to enable it.');
-  console.log('Press Ctrl+C to stop. Current listings are the baseline; only newer uploads are saved.');
+  console.log('Press Ctrl+C to stop. Every apartment in the configured page range is imported once.');
 
   writeDashboard();
   const server = startWebServer();

@@ -38,12 +38,10 @@ Double-click **run.bat**. On its first run it installs Chromium, so setup can ta
 a few minutes. A browser window opens. If MyHome asks for a security check,
 complete it once; the browser profile is kept in `.browser-profile` for later runs.
 
-The first check silently records the current results as a baseline. It does not
-open, announce, or export those older listings. Every five seconds the watcher
-merges MyHome's first five filtered result pages, including S-VIP, VIP+, VIP, and the
-newest ordinary listings. It uses the exact listing ID and original listing age,
-not visual position, so old promoted/pinned results are ignored. Press Ctrl+C in
-the terminal to stop.
+The first check imports every apartment found across the first five filtered
+MyHome result pages. Later checks revisit those five pages and import any listing
+ID that has not already been saved. Promoted and older listings are included;
+exact listing IDs prevent duplicates. Press Ctrl+C in the terminal to stop.
 
 ## Command-line options
 
@@ -58,8 +56,8 @@ node main.js --url "https://www.myhome.ge/your-search-url" --pages 5
 Paste the complete URL after applying any filters on MyHome. The watcher passes
 all query-string filters to every page and changes only the `page` value. It scans
 five pages by default; `--pages` accepts values from 1 through 10. Changing the
-URL or page count creates a fresh baseline for that search, preventing older ads
-from being announced as newly posted.
+URL or page count updates the persisted search configuration. Every listing from
+the selected page range is imported, not only newly posted listings.
 
 By default, MyHome scans five pages each for Saburtalo, Vake, Didi Dighomi, and
 Digomi. The dashboard buttons filter saved results by those districts.
