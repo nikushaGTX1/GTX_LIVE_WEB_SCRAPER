@@ -346,6 +346,12 @@ function readRequestJson(request) {
 }
 
 function publicWatcherConfig(viewer = { role: 'admin' }) {
+  const apiEnabled = Boolean(process.env.WEBSITE_API_EMAIL && process.env.WEBSITE_API_PASSWORD);
+  const savedApartments = viewer.role === 'admin' ? Object.values(readJsonFile(DATA_PATH)) : [];
+  const pendingAssignments = viewer.role === 'admin'
+    ? savedApartments.filter(item => !item._baseline && !item._excluded && !item._api_uploaded).length
+    : 0;
+  const assignmentError = savedApartments.find(item => item._api_error)?._api_error || null;
   return {
     enabled: watcherRuntime.enabled,
     pages: watcherRuntime.pages,
@@ -353,7 +359,8 @@ function publicWatcherConfig(viewer = { role: 'admin' }) {
     searches: viewer.role === 'admin' ? watcherRuntime.searches : [],
     status: watcherStatus,
     canAdmin: viewer.role === 'admin',
-    viewer: { email: viewer.email, name: viewer.name, role: viewer.role, agentId: viewer.agentId }
+    viewer: { email: viewer.email, name: viewer.name, role: viewer.role, agentId: viewer.agentId },
+    assignment: { enabled: apiEnabled, pending: pendingAssignments, lastError: assignmentError }
   };
 }
 
@@ -1020,16 +1027,20 @@ async function uploadApartmentToWebsite(item, agentId) {
   return websiteApiRequest('/api/Apartments', { method: 'POST', body: form });
 }
 
-async function syncPendingWebsiteApartments(data, state) {
+async function syncPendingWebsiteApartments(data, state, onlyApartmentId = null) {
   if (!process.env.WEBSITE_API_EMAIL || !process.env.WEBSITE_API_PASSWORD) return 0;
   const pending = Object.values(data)
-    .filter(item => !item._baseline && !item._excluded && !item._api_uploaded)
+    .filter(item => !item._baseline && !item._excluded && !item._api_uploaded &&
+      (onlyApartmentId == null || String(item.apartment_id) === String(onlyApartmentId)))
     .sort((a, b) => String(a.first_seen).localeCompare(String(b.first_seen)));
   if (!pending.length) return 0;
   const agents = await getDistributionAgents();
   let uploaded = 0;
-  for (const item of pending) {
+  for (let pendingIndex = 0; pendingIndex < pending.length; pendingIndex += 1) {
+    const item = pending[pendingIndex];
     if (watcherRuntime && !watcherRuntime.enabled) break;
+    watcherStatus.state = 'assigning';
+    watcherStatus.message = `Assigning apartment ${pendingIndex + 1} of ${pending.length} to agents…`;
     const index = Number(state.api_assignment_index || 0) % agents.length;
     const agent = agents[index];
     try {
@@ -1169,6 +1180,11 @@ async function scan(context, data, state, options) {
         notify(item);
         saved += 1;
         watcherStatus.imported = saved;
+        try {
+          await syncPendingWebsiteApartments(data, state, item.apartment_id);
+        } catch (error) {
+          console.error(`Immediate Website API assignment failed for MyHome ID ${item.apartment_id}: ${error.message}`);
+        }
         await sleep(1500);
       } catch (error) {
         console.error(`Could not read ID ${card.id}: ${error.message}`);

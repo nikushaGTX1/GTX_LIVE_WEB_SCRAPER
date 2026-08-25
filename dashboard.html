@@ -59,6 +59,7 @@
         </div>
         <p id="status-error" class="status-error" hidden></p>
       </div>
+      <p id="assignment-status" class="assignment-status"></p>
       <div id="active-searches" class="active-searches"></div>
     </section>
 
@@ -113,6 +114,12 @@
     const showWatcherConfig = config => {
       watcherConfig = config;
       document.getElementById('admin-controls').hidden = !config.canAdmin;
+      const assignment = document.getElementById('assignment-status');
+      assignment.textContent = config.assignment?.enabled
+        ? `Website API assignment enabled · ${config.assignment.pending} pending`
+        : 'Website API assignment disabled — configure WEBSITE_API_EMAIL and WEBSITE_API_PASSWORD';
+      if (config.assignment?.lastError) assignment.textContent += ` · Error: ${config.assignment.lastError}`;
+      assignment.classList.toggle('warning', !config.assignment?.enabled || config.assignment.pending > 0);
       toggle.textContent = config.enabled ? 'Stop scraper' : 'Start scraper';
       toggle.classList.toggle('running', config.enabled);
       document.getElementById('refresh-status').textContent = config.enabled

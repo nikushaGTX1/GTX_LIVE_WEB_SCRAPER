@@ -33,6 +33,9 @@ On Railway, `DASHBOARD_USER` and `DASHBOARD_PASSWORD` are required before the
 settings endpoint accepts changes.
 The same panel reports live scanning/import progress, listing counts, the last
 successful completion time, pause state, and the latest scraper error.
+Each imported apartment is uploaded and assigned immediately instead of waiting
+for the full page range to finish. Any older pending assignments are processed on
+the next Start, and the admin panel shows their count plus API credential status.
 The Stop button safely ends an active import after its current apartment, retains
 all completed work, leaves remaining IDs ready for the next Start, and pauses the
 dashboard's three-second page refresh until scraping is started again.
