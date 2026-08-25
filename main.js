@@ -7,12 +7,7 @@ const crypto = require('node:crypto');
 const { pathToFileURL } = require('node:url');
 const { chromium } = require('playwright');
 
-const DISTRICT_SEARCHES = [
-  { district: 'Saburtalo', url: 'https://www.myhome.ge/udzravi-qoneba/qiravdeba/bina/tbilisi/saburtalo/?deal_types=2&real_estate_types=1&cities=1&urbans=47&districts=4&currency_id=1&CardView=1&page=1&owner_type=physical' },
-  { district: 'Vake', url: 'https://www.myhome.ge/udzravi-qoneba/qiravdeba/bina/tbilisi/vake/?deal_types=2&real_estate_types=1&cities=1&urbans=38&districts=4&currency_id=1&CardView=1&page=1&owner_type=physical' },
-  { district: 'Didi Dighomi', url: 'https://www.myhome.ge/udzravi-qoneba/qiravdeba/bina/tbilisi/didi-dighomi/?deal_types=2&real_estate_types=1&cities=1&urbans=29&districts=4&currency_id=1&CardView=1&page=1&owner_type=physical' },
-  { district: 'Digomi', url: 'https://www.myhome.ge/udzravi-qoneba/qiravdeba/bina/tbilisi/digomi/?deal_types=2&real_estate_types=1&cities=1&urbans=24&districts=4&currency_id=1&CardView=1&page=1&owner_type=physical' }
-];
+const DISTRICT_SEARCHES = [];
 const WEBSITE_API_URL = process.env.WEBSITE_API_URL || 'https://websiteapi-production-c970.up.railway.app';
 const SS_URL = 'https://home.ss.ge/ka/udzravi-qoneba/l/bina/qiravdeba?cityIdList=95&subdistrictIds=2%2C3%2C4%2C5%2C26%2C27%2C44%2C45%2C46%2C47%2C48%2C49%2C50&currencyId=1&advancedSearch=%7B%22individualEntityOnly%22%3Atrue%7D';
 const ROOT = __dirname;
@@ -30,6 +25,7 @@ const STATE_PATH = path.join(DATA_ROOT, 'watcher-state.json');
 const WATCHER_CONFIG_PATH = path.join(DATA_ROOT, 'watcher-config.json');
 const PROFILE_PATH = process.env.WATCHER_PROFILE || path.join(DATA_ROOT, '.browser-profile');
 const IS_HOSTED = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID);
+const SS_SCRAPER_ENABLED = String(process.env.ENABLE_SS_SCRAPER || '').toLowerCase() === 'true';
 
 const EXCLUDED_DESCRIPTION_PHRASES = [
   'აგენტებმა არ დამირეკოთ',
@@ -221,13 +217,7 @@ function buildDashboard(viewer = null, view = 'all') {
     <td><span class="source ${item.source === 'SS.ge' ? 'ss' : ''}">${html(item.source)}</span></td>
     <td>${html(item.district || 'Other')}</td>
     <td>${html(item.assigned_agent_id || 'Pending')}</td>
-    <td>${html(item.posted || item.first_seen)}</td>
-    <td><a href="${html(item.url)}" target="_blank">${html(item.apartment_id)}</a></td>
-    <td class="price">${html(item.price)}</td>
-    <td><a href="tel:${html(item.phone)}">${html(item.phone)}</a></td>
-    <td>${html(item.rooms)}</td><td>${html(item.area_m2)}</td>
-    <td>${html(item.floor)}${item.total_floors ? `/${html(item.total_floors)}` : ''}</td>
-    <td>${html(item.address)}</td>
+    <td><a class="listing-link" href="${html(item.url)}" target="_blank" rel="noopener noreferrer">Open listing ↗</a></td>
     <td class="review-cell">
       <div class="review-buttons">
         <button class="review-button accept-button" type="button" title="Accept and comment" aria-label="Accept apartment">✓</button>
@@ -236,7 +226,7 @@ function buildDashboard(viewer = null, view = 'all') {
     </td>
   </tr>
   <tr class="comment-row" data-apartment-id="${html(item.apartment_id)}" data-comment-for="${html(item.apartment_id)}" data-district="${html(item.district || 'Other')}" hidden>
-    <td colspan="12">
+    <td colspan="5">
       <div class="comment-dropdown">
         <textarea class="review-comment" rows="3" placeholder="Type a comment…">${html(item._review_comment || '')}</textarea>
         <div class="review-audit">${item._reviewed_by ? `Accepted by ${html(item._reviewed_by)}${item._reviewed_at ? ` · ${html(item._reviewed_at)}` : ''}` : ''}</div>
@@ -249,7 +239,7 @@ function buildDashboard(viewer = null, view = 'all') {
     throw new Error(`Dashboard template is missing: ${DASHBOARD_TEMPLATE_PATH}`);
   }
   const content = combined.length
-    ? `<table><thead><tr><th>Source</th><th>District</th><th>Assigned agent</th><th>Uploaded</th><th>ID</th><th>Price</th><th>Phone</th><th>Rooms</th><th>m²</th><th>Floor</th><th>Address</th><th>Review</th></tr></thead><tbody>${rows}</tbody></table>`
+    ? `<table><thead><tr><th>Source</th><th>District</th><th>Assigned agent</th><th>Link</th><th>Review</th></tr></thead><tbody>${rows}</tbody></table>`
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
     .replace('{{LISTING_COUNT}}', String(combined.length))
@@ -432,6 +422,10 @@ async function updateWatcherConfig(request, response) {
       watcherStatus.message = watcherRuntime.searches.length
         ? 'Search removed. Stopping the active queue safely…'
         : 'No MyHome search links configured.';
+    }
+    if (watcherRuntime.enabled && !watcherRuntime.searches.length) {
+      watcherRuntime.enabled = false;
+      throw new Error('Add a filtered MyHome URL before starting the scraper');
     }
     saveWatcherConfig(watcherRuntime);
     response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
@@ -628,11 +622,13 @@ function saveWatcherConfig(config) {
 function loadWatcherConfig(options) {
   let saved = null;
   try { saved = JSON.parse(fs.readFileSync(WATCHER_CONFIG_PATH, 'utf8')); } catch { /* Use CLI defaults. */ }
+  const currentConfig = saved?.version === 2;
   const config = {
-    enabled: saved?.enabled !== false,
-    pages: Number.isInteger(saved?.pages) && saved.pages >= 1 && saved.pages <= 10 ? saved.pages : options.pages,
-    interval: Number.isFinite(saved?.interval) && saved.interval >= 3 ? saved.interval : options.interval,
-    searches: Array.isArray(saved?.searches) ? saved.searches : options.searches
+    version: 2,
+    enabled: currentConfig ? saved.enabled !== false : options.searches.length > 0,
+    pages: currentConfig && Number.isInteger(saved.pages) && saved.pages >= 1 && saved.pages <= 10 ? saved.pages : options.pages,
+    interval: currentConfig && Number.isFinite(saved.interval) && saved.interval >= 3 ? saved.interval : options.interval,
+    searches: currentConfig && Array.isArray(saved.searches) ? saved.searches : options.searches
   };
   config.searches = config.searches.map(search => ({
     district: clean(search.district) || districtNameFromUrl(search.url),
@@ -1446,7 +1442,7 @@ async function main() {
           watcherStatus.message = 'MyHome scraping is paused by the admin.';
           console.log('MyHome watcher is paused by the admin.');
         }
-        await scanSs(context, ssData, state);
+        if (SS_SCRAPER_ENABLED) await scanSs(context, ssData, state);
       } catch (error) {
         watcherStatus.state = 'error';
         watcherStatus.message = 'The last scraper check failed.';

@@ -345,6 +345,7 @@ tr.review-rejecting { animation: reject-away 450ms ease forwards; pointer-events
 }
 a { color: var(--primary); text-decoration: none; }
 a:hover { text-decoration: underline; }
+.listing-link { display: inline-block; padding: 7px 10px; border-radius: 8px; background: #e8f2ff; font-weight: 700; white-space: nowrap; }
 .price { font-weight: 700; }
 
 .source {

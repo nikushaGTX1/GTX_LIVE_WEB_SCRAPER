@@ -1,8 +1,9 @@
 # MyHome new-apartment watcher
 
-This program watches the supplied MyHome.ge Didi Dighomi rental search and the
-configured SS.ge owner-only Vake-Saburtalo rental search. It opens every previously
-unseen listing, reveals the publicly available contact phone, and saves:
+This program watches only the filtered MyHome.ge searches explicitly added by an
+admin. Optional SS.ge scraping is disabled unless enabled by environment variable.
+It opens every previously unseen listing, reveals the publicly available contact
+phone, and saves:
 
 - apartment ID and URL
 - title and address
@@ -29,8 +30,8 @@ rebuilt or the district configuration changes.
 Authenticated dashboard admins can paste another filtered MyHome URL, select
 1–10 pages, set a polling interval (minimum 3 seconds), and pause or start MyHome
 scraping. These controls are stored in `watcher-config.json` and survive restarts.
-On Railway, `DASHBOARD_USER` and `DASHBOARD_PASSWORD` are required before the
-settings endpoint accepts changes.
+On Railway, users authenticate through the configured dashboard authentication
+mode, and only accounts resolved as admins can change these settings.
 The same panel reports live scanning/import progress, listing counts, the last
 successful completion time, pause state, and the latest scraper error.
 Each imported apartment is uploaded and assigned immediately instead of waiting
@@ -93,8 +94,11 @@ five pages by default; `--pages` accepts values from 1 through 10. Changing the
 URL or page count updates the persisted search configuration. Every listing from
 the selected page range is imported, not only newly posted listings.
 
-By default, MyHome scans five pages each for Saburtalo, Vake, Didi Dighomi, and
-Digomi. The dashboard buttons filter saved results by those districts.
+No district is scraped by default. After this configuration migration, the
+watcher starts paused with an empty search list while preserving apartment
+history. An admin must paste and save each desired filtered MyHome URL. SS.ge is
+also disabled by default; set `ENABLE_SS_SCRAPER=true` only when it is explicitly
+needed.
 
 ## Website API integration
 
