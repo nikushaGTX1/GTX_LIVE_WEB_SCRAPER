@@ -75,6 +75,7 @@ const watcherStatus = {
   importTotal: 0, lastStartedAt: null, lastCompletedAt: null, lastError: null
 };
 const dashboardApiSessions = new Map();
+const streetResolutionCache = new Map();
 
 function clean(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -971,16 +972,20 @@ async function getDistributionAgents() {
     .sort((a, b) => a.id.localeCompare(b.id));
   const configuredIds = String(process.env.WEBSITE_API_AGENT_IDS || '')
     .split(',').map(value => value.trim()).filter(Boolean);
+  const distributionCount = Number(process.env.AGENT_DISTRIBUTION_COUNT || 8);
+  if (!Number.isInteger(distributionCount) || distributionCount < 1) {
+    throw new Error('AGENT_DISTRIBUTION_COUNT must be a positive whole number');
+  }
   websiteApiAgents = configuredIds.length
     ? configuredIds.map(id => available.find(agent => agent.id === id)).filter(Boolean)
-    : available;
-  if (!websiteApiAgents.length) {
-    throw new Error('Website API returned no agents for apartment distribution');
-  }
+    : available.slice(0, distributionCount);
   if (configuredIds.length && websiteApiAgents.length !== configuredIds.length) {
     const found = new Set(websiteApiAgents.map(agent => agent.id));
     const missing = configuredIds.filter(id => !found.has(id));
     throw new Error(`Configured Website API agent IDs were not found: ${missing.join(', ')}`);
+  }
+  if (websiteApiAgents.length !== distributionCount) {
+    throw new Error(`Round-robin requires exactly ${distributionCount} agents; resolved ${websiteApiAgents.length}`);
   }
   return websiteApiAgents;
 }
@@ -1003,8 +1008,47 @@ async function websiteApiHasApartment(item) {
   );
 }
 
+function canonicalStreet(payload) {
+  if (Array.isArray(payload)) {
+    for (const item of payload) {
+      const resolved = canonicalStreet(item);
+      if (resolved) return resolved;
+    }
+  }
+  const candidates = [payload, payload?.data, payload?.street, payload?.result, payload?.data?.street].filter(Boolean);
+  for (const value of candidates) {
+    const id = value.streetId ?? value.street_id ?? value.id;
+    if (id != null) return { id: String(id), name: clean(value.street || value.streetName || value.name || value.title) };
+  }
+  return null;
+}
+
+async function resolveWebsiteStreet(address) {
+  const original = clean(address);
+  if (!original) throw new Error('Apartment address is empty; canonical StreetId cannot be resolved');
+  if (streetResolutionCache.has(original)) return streetResolutionCache.get(original);
+  const withoutBuilding = clean(original
+    .replace(/(?:\s|,)+(?:N|№|#)?\s*\d+[\w/-]*\s*$/iu, '')
+    .replace(/(?:\s|,)+(?:კორპუსი|კორპ\.?|ბინა)\s*\d+.*$/iu, ''));
+  const attempts = [...new Set([original, withoutBuilding].filter(Boolean))];
+  for (const street of attempts) {
+    const query = new URLSearchParams({ street });
+    try {
+      const resolved = canonicalStreet(await websiteApiRequest(`/api/Locations/resolve-street?${query}`));
+      if (resolved) {
+        streetResolutionCache.set(original, resolved);
+        return resolved;
+      }
+    } catch (error) {
+      if (!/HTTP (?:400|404)/.test(error.message)) throw error;
+    }
+  }
+  throw new Error(`Canonical StreetId was not found for address: ${original}`);
+}
+
 async function uploadApartmentToWebsite(item, agentId) {
   if (await websiteApiHasApartment(item)) return { existing: true };
+  const street = await resolveWebsiteStreet(item.address);
   const form = new FormData();
   form.set('UploadedByUserId', agentId);
   form.set('Title', item.title || `Apartment ${item.apartment_id}`);
@@ -1013,6 +1057,8 @@ async function uploadApartmentToWebsite(item, agentId) {
   form.set('Region', 'Tbilisi');
   form.set('District', item.district || 'Other');
   if (item.address) form.set('Address', item.address);
+  form.set('StreetId', street.id);
+  if (street.name) form.set('Street', street.name);
   if (item.phone) form.set('PhoneNumber', item.phone);
   const price = positiveNumber(item.price);
   const size = positiveNumber(item.area_m2);
@@ -1041,15 +1087,23 @@ async function syncPendingWebsiteApartments(data, state, onlyApartmentId = null)
     if (watcherRuntime && !watcherRuntime.enabled) break;
     watcherStatus.state = 'assigning';
     watcherStatus.message = `Assigning apartment ${pendingIndex + 1} of ${pending.length} to agents…`;
-    const index = Number(state.api_assignment_index || 0) % agents.length;
-    const agent = agents[index];
+    let agent = item.assigned_agent_id
+      ? agents.find(candidate => candidate.id === String(item.assigned_agent_id))
+      : null;
+    if (!agent) {
+      const index = Number(state.api_assignment_index || 0) % agents.length;
+      agent = agents[index];
+      item.assigned_agent_id = agent.id;
+      item._assigned_at = new Date().toISOString();
+      state.api_assignment_index = Number(state.api_assignment_index || 0) + 1;
+      saveData(data);
+      saveState(state);
+    }
     try {
       await uploadApartmentToWebsite(item, agent.id);
-      item.assigned_agent_id = agent.id;
       item._api_uploaded = true;
       item._api_uploaded_at = new Date().toISOString();
       delete item._api_error;
-      state.api_assignment_index = Number(state.api_assignment_index || 0) + 1;
       saveData(data);
       saveState(state);
       uploaded += 1;

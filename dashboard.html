@@ -116,7 +116,7 @@
       document.getElementById('admin-controls').hidden = !config.canAdmin;
       const assignment = document.getElementById('assignment-status');
       assignment.textContent = config.assignment?.enabled
-        ? `Website API assignment enabled · ${config.assignment.pending} pending`
+        ? `Round-robin assignment enabled · ${config.assignment.pending} pending API uploads`
         : 'Website API assignment disabled — configure WEBSITE_API_EMAIL and WEBSITE_API_PASSWORD';
       if (config.assignment?.lastError) assignment.textContent += ` · Error: ${config.assignment.lastError}`;
       assignment.classList.toggle('warning', !config.assignment?.enabled || config.assignment.pending > 0);
