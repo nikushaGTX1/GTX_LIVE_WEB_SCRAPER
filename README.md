@@ -45,7 +45,8 @@ retries. Before creating the API apartment, its address is resolved through
 Agents can review their assigned rows with a green checkmark or red ×. Rejecting
 plays a red removal animation and persistently hides the apartment. Accepting
 plays a green animation, opens a comment editor, and stores the comment plus the
-reviewing account and time. The server prevents agents from reviewing another
+reviewing account and time. The editor spans a separate row directly below the
+apartment rather than expanding in the right-side action cell. The server prevents agents from reviewing another
 agent's apartment; admins may review any row.
 The Stop button safely ends an active import after its current apartment, retains
 all completed work, leaves remaining IDs ready for the next Start, and pauses the

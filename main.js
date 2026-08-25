@@ -212,7 +212,7 @@ function buildDashboard(viewer = null) {
     combined = combined.filter(item => String(item.assigned_agent_id || '') === viewer.agentId);
   }
 
-  const rows = combined.map(item => `<tr data-apartment-id="${html(item.apartment_id)}" data-district="${html(item.district || 'Other')}" class="${item._review_status === 'accepted' ? 'review-accepted' : ''}">
+  const rows = combined.map(item => `<tr data-apartment-id="${html(item.apartment_id)}" data-district="${html(item.district || 'Other')}" class="apartment-row ${item._review_status === 'accepted' ? 'review-accepted' : ''}">
     <td><span class="source ${item.source === 'SS.ge' ? 'ss' : ''}">${html(item.source)}</span></td>
     <td>${html(item.district || 'Other')}</td>
     <td>${html(item.assigned_agent_id || 'Pending')}</td>
@@ -228,7 +228,11 @@ function buildDashboard(viewer = null) {
         <button class="review-button accept-button" type="button" title="Accept and comment" aria-label="Accept apartment">✓</button>
         <button class="review-button reject-button" type="button" title="Reject apartment" aria-label="Reject apartment">×</button>
       </div>
-      <div class="comment-dropdown" ${item._review_status === 'accepted' ? '' : 'hidden'}>
+    </td>
+  </tr>
+  <tr class="comment-row" data-apartment-id="${html(item.apartment_id)}" data-comment-for="${html(item.apartment_id)}" data-district="${html(item.district || 'Other')}" ${item._review_status === 'accepted' ? '' : 'hidden'}>
+    <td colspan="12">
+      <div class="comment-dropdown">
         <textarea class="review-comment" rows="3" placeholder="Type a comment…">${html(item._review_comment || '')}</textarea>
         <button class="save-comment" type="button">Save comment</button>
       </div>

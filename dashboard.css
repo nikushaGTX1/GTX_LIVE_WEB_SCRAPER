@@ -304,16 +304,18 @@ tbody tr.review-accepted { box-shadow: inset 4px 0 #20a464; }
 
 .comment-dropdown {
   display: grid;
+  grid-template-columns: minmax(240px, 1fr) auto;
+  align-items: end;
   gap: 7px;
-  width: 250px;
-  margin-top: 9px;
-  padding: 9px;
+  width: 100%;
+  padding: 10px;
   border: 1px solid #bce5ce;
   border-radius: 10px;
   background: #f2fbf6;
 }
 
-.comment-dropdown[hidden] { display: none; }
+.comment-row[hidden] { display: none; }
+.comment-row td { padding: 8px 14px 12px; background: #f8fcfa; }
 .review-comment { resize: vertical; min-height: 64px; padding: 8px; border: 1px solid #b8d8c6; border-radius: 8px; font: inherit; }
 .review-comment:focus { border-color: #20a464; outline: 3px solid rgb(32 164 100 / 12%); }
 .save-comment { justify-self: end; padding: 7px 10px; border: 0; border-radius: 7px; background: #168653; color: #fff; cursor: pointer; font-weight: 700; }
@@ -355,6 +357,7 @@ a:hover { text-decoration: underline; }
   .header-meta { width: 100%; flex-direction: column; }
   #watcher-form { grid-template-columns: 1fr; }
   .control-heading { align-items: flex-start; }
+  .comment-dropdown { grid-template-columns: 1fr; }
 }
 
 @media (min-width: 641px) and (max-width: 1000px) {

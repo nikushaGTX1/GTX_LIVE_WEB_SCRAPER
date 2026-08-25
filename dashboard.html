@@ -205,29 +205,33 @@
       return result;
     };
     document.getElementById('dashboard-content').addEventListener('click', async event => {
-      const row = event.target.closest('tr[data-apartment-id]');
-      if (!row) return;
+      const clickedRow = event.target.closest('tr[data-apartment-id]');
+      if (!clickedRow) return;
+      const apartmentId = clickedRow.dataset.apartmentId;
+      const row = document.querySelector(`tr.apartment-row[data-apartment-id="${apartmentId}"]`);
+      const commentRow = document.querySelector(`tr.comment-row[data-comment-for="${apartmentId}"]`);
+      if (!row || !commentRow) return;
       reviewInteractionUntil = Date.now() + 10000;
       try {
         if (event.target.closest('.reject-button')) {
           if (!confirm('Reject and remove this apartment from your list?')) return;
           await saveReview(row, 'rejected');
           row.classList.add('review-rejecting');
-          setTimeout(() => row.remove(), 450);
+          commentRow.hidden = true;
+          setTimeout(() => { row.remove(); commentRow.remove(); }, 450);
           return;
         }
         if (event.target.closest('.accept-button')) {
-          const dropdown = row.querySelector('.comment-dropdown');
-          const comment = row.querySelector('.review-comment').value;
+          const comment = commentRow.querySelector('.review-comment').value;
           await saveReview(row, 'accepted', comment);
           row.classList.add('review-accepting', 'review-accepted');
-          dropdown.hidden = false;
-          row.querySelector('.review-comment').focus();
+          commentRow.hidden = false;
+          commentRow.querySelector('.review-comment').focus();
           setTimeout(() => row.classList.remove('review-accepting'), 650);
           return;
         }
         if (event.target.closest('.save-comment')) {
-          const comment = row.querySelector('.review-comment').value;
+          const comment = commentRow.querySelector('.review-comment').value;
           await saveReview(row, 'accepted', comment);
           row.classList.add('review-accepting', 'review-accepted');
           setTimeout(() => row.classList.remove('review-accepting'), 650);
@@ -237,7 +241,7 @@
       }
     });
     setInterval(() => {
-      const editingReview = document.activeElement.closest?.('.review-cell');
+      const editingReview = document.activeElement.closest?.('.comment-row');
       if (watcherConfig?.enabled && !editingReview && Date.now() > reviewInteractionUntil && !document.activeElement.closest?.('.admin-controls')) location.reload();
     }, 3000);
   </script>
