@@ -230,7 +230,7 @@ function buildDashboard(viewer = null) {
       </div>
     </td>
   </tr>
-  <tr class="comment-row" data-apartment-id="${html(item.apartment_id)}" data-comment-for="${html(item.apartment_id)}" data-district="${html(item.district || 'Other')}" ${item._review_status === 'accepted' ? '' : 'hidden'}>
+  <tr class="comment-row" data-apartment-id="${html(item.apartment_id)}" data-comment-for="${html(item.apartment_id)}" data-district="${html(item.district || 'Other')}" hidden>
     <td colspan="12">
       <div class="comment-dropdown">
         <textarea class="review-comment" rows="3" placeholder="Type a comment…">${html(item._review_comment || '')}</textarea>

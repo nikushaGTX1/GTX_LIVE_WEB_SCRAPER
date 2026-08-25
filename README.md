@@ -46,7 +46,9 @@ Agents can review their assigned rows with a green checkmark or red ×. Rejectin
 plays a red removal animation and persistently hides the apartment. Accepting
 plays a green animation, opens a comment editor, and stores the comment plus the
 reviewing account and time. The editor spans a separate row directly below the
-apartment rather than expanding in the right-side action cell. The server prevents agents from reviewing another
+apartment rather than expanding in the right-side action cell. It stays collapsed
+on page load—even when a saved comment exists—and opens only when the green
+checkmark beside the red × is clicked. The server prevents agents from reviewing another
 agent's apartment; admins may review any row.
 The Stop button safely ends an active import after its current apartment, retains
 all completed work, leaves remaining IDs ready for the next Start, and pauses the
