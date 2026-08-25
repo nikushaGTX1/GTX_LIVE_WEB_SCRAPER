@@ -22,6 +22,10 @@ generated `live-results.html` is rebuilt automatically and should not be edited.
 Open `live-results.html` (or `http://localhost:3000`) to view real scraper data;
 opening `dashboard.html` directly shows only a design preview.
 
+Refreshing the dashboard or restarting the watcher does not remove saved
+apartments. Existing records are preserved even if the watcher state file must be
+rebuilt or the district configuration changes.
+
 ## Start
 
 Double-click **run.bat**. On its first run it installs Chromium, so setup can take
@@ -83,6 +87,8 @@ scraper reports individual listings it cannot parse and continues watching.
 The included `Dockerfile` runs the watcher headlessly and serves the dashboard on
 Railway's assigned `PORT`. Attach a Railway Volume at `/data`; the app automatically
 uses `RAILWAY_VOLUME_MOUNT_PATH` for its seen IDs, CSV files, and browser profile.
+The Volume is required for scraper history to survive Railway redeploys. Apartments
+already uploaded to the Website API remain stored in that API's database as well.
 
 Recommended service variables:
 

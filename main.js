@@ -955,14 +955,15 @@ async function scan(context, data, state, options) {
 async function scanSs(context, data, state) {
   const cards = await requestSsCards(context);
   if (!state.ss_initialized || state.ss_engine_version !== 4) {
-    for (const key of Object.keys(data)) delete data[key];
     for (const card of cards) {
-      data[card.id] = {
-        apartment_id: card.id,
-        url: card.url,
-        first_seen: new Date().toISOString(),
-        _baseline: true
-      };
+      if (!data[card.id]) {
+        data[card.id] = {
+          apartment_id: card.id,
+          url: card.url,
+          first_seen: new Date().toISOString(),
+          _baseline: true
+        };
+      }
     }
     state.ss_initialized = true;
     state.ss_engine_version = 4;
@@ -1024,15 +1025,6 @@ async function main() {
   const data = loadData();
   const ssData = loadSsData();
   const state = loadState();
-  // Existing results came from the old initial-import behavior. Preserve them in
-  // JSON for recovery, but treat them as the baseline and remove them from CSV.
-  if (!state.initialized && Object.keys(data).length) {
-    for (const item of Object.values(data)) item._baseline = true;
-    state.initialized = true;
-    state.initialized_at = new Date().toISOString();
-    saveData(data);
-    saveState(state);
-  }
   const excludedMyHome = markExcludedDescriptions(data);
   const excludedSs = markExcludedDescriptions(ssData);
   saveData(data);
