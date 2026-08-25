@@ -69,6 +69,10 @@ let ssAuthToken = '';
 let websiteApiToken = '';
 let websiteApiAgents = [];
 let watcherRuntime = null;
+const watcherStatus = {
+  state: 'starting', message: 'Starting scraper…', found: 0, imported: 0,
+  importTotal: 0, lastStartedAt: null, lastCompletedAt: null, lastError: null
+};
 
 function clean(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -253,7 +257,13 @@ function readRequestJson(request) {
 }
 
 function publicWatcherConfig() {
-  return { enabled: watcherRuntime.enabled, pages: watcherRuntime.pages, interval: watcherRuntime.interval, searches: watcherRuntime.searches };
+  return {
+    enabled: watcherRuntime.enabled,
+    pages: watcherRuntime.pages,
+    interval: watcherRuntime.interval,
+    searches: watcherRuntime.searches,
+    status: watcherStatus
+  };
 }
 
 async function updateWatcherConfig(request, response) {
@@ -951,8 +961,16 @@ async function extractSsDetail(page, card) {
 }
 
 async function scan(context, data, state, options) {
+  watcherStatus.state = 'scanning';
+  watcherStatus.message = `Reading ${options.pages} page(s) across ${options.searches.length} search(es)…`;
+  watcherStatus.lastStartedAt = new Date().toISOString();
+  watcherStatus.lastError = null;
+  watcherStatus.found = 0;
+  watcherStatus.imported = 0;
+  watcherStatus.importTotal = 0;
   const cards = await collectDistrictCards(options.searches, options.pages);
   const byId = new Map(cards.map(card => [card.id, card]));
+  watcherStatus.found = byId.size;
   const activeSearchKey = options.searches
     .map(search => `${search.district}:${searchKey(search.url, options.pages)}`)
     .sort().join('||');
@@ -969,6 +987,7 @@ async function scan(context, data, state, options) {
     const saved = data[card.id];
     return !saved || (saved._baseline && !saved._excluded && !saved.title);
   });
+  watcherStatus.importTotal = toImport.length;
   console.log(`Checked ${byId.size} listings across the configured pages; ${toImport.length} still need importing.`);
 
   const repairs = cards.filter(card => {
@@ -992,12 +1011,21 @@ async function scan(context, data, state, options) {
   } catch (error) {
     console.error(`Website API synchronization failed: ${error.message}`);
   }
-  if (!toImport.length) return 0;
+  if (!toImport.length) {
+    watcherStatus.state = 'idle';
+    watcherStatus.message = `Up to date — ${byId.size} apartments checked.`;
+    watcherStatus.lastCompletedAt = new Date().toISOString();
+    return 0;
+  }
 
   const detailPage = await context.newPage();
   let saved = 0;
   try {
-    for (const card of toImport.reverse()) {
+    const importQueue = toImport.reverse();
+    for (let index = 0; index < importQueue.length; index += 1) {
+      const card = importQueue[index];
+      watcherStatus.state = 'importing';
+      watcherStatus.message = `Importing apartment ${index + 1} of ${importQueue.length} (ID ${card.id})…`;
       try {
         const item = await extractDetail(detailPage, card);
         if (hasExcludedDescription(item.description)) {
@@ -1013,6 +1041,7 @@ async function scan(context, data, state, options) {
         saveData(data);
         notify(item);
         saved += 1;
+        watcherStatus.imported = saved;
         await sleep(1500);
       } catch (error) {
         console.error(`Could not read ID ${card.id}: ${error.message}`);
@@ -1026,6 +1055,9 @@ async function scan(context, data, state, options) {
   } catch (error) {
     console.error(`Website API synchronization failed: ${error.message}`);
   }
+  watcherStatus.state = 'idle';
+  watcherStatus.message = `Completed — checked ${byId.size}, imported ${saved}.`;
+  watcherStatus.lastCompletedAt = new Date().toISOString();
   return saved;
 }
 
@@ -1132,9 +1164,16 @@ async function main() {
       console.log(`\n[${new Date().toLocaleString()}] Checking MyHome...`);
       try {
         if (watcherRuntime.enabled) await scan(context, data, state, watcherRuntime);
-        else console.log('MyHome watcher is paused by the admin.');
+        else {
+          watcherStatus.state = 'paused';
+          watcherStatus.message = 'MyHome scraping is paused by the admin.';
+          console.log('MyHome watcher is paused by the admin.');
+        }
         await scanSs(context, ssData, state);
       } catch (error) {
+        watcherStatus.state = 'error';
+        watcherStatus.message = 'The last scraper check failed.';
+        watcherStatus.lastError = error.message;
         console.error(`Scan failed: ${error.message}`);
       }
       if (options.once) break;

@@ -31,6 +31,8 @@ Authenticated dashboard admins can paste another filtered MyHome URL, select
 scraping. These controls are stored in `watcher-config.json` and survive restarts.
 On Railway, `DASHBOARD_USER` and `DASHBOARD_PASSWORD` are required before the
 settings endpoint accepts changes.
+The same panel reports live scanning/import progress, listing counts, the last
+successful completion time, pause state, and the latest scraper error.
 
 ## Start
 

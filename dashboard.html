@@ -48,6 +48,16 @@
         <button class="save-button" type="submit">Add search &amp; save</button>
       </form>
       <p id="watcher-message" class="control-message" aria-live="polite"></p>
+      <div class="scraper-status" aria-live="polite">
+        <span id="scraper-state" class="status-badge">Starting</span>
+        <strong id="scraper-status-message">Connecting to scraper…</strong>
+        <div class="status-stats">
+          <span>Found <strong id="status-found">0</strong></span>
+          <span>Imported <strong id="status-imported">0</strong>/<strong id="status-total">0</strong></span>
+          <span>Last completed <strong id="status-completed">Never</strong></span>
+        </div>
+        <p id="status-error" class="status-error" hidden></p>
+      </div>
       <div id="active-searches" class="active-searches"></div>
     </section>
 
@@ -109,6 +119,22 @@
         badge.textContent = search.district;
         return badge;
       }));
+      showWatcherStatus(config.status);
+    };
+    const showWatcherStatus = status => {
+      if (!status) return;
+      const state = document.getElementById('scraper-state');
+      state.textContent = status.state;
+      state.className = `status-badge ${status.state}`;
+      document.getElementById('scraper-status-message').textContent = status.message || '';
+      document.getElementById('status-found').textContent = status.found || 0;
+      document.getElementById('status-imported').textContent = status.imported || 0;
+      document.getElementById('status-total').textContent = status.importTotal || 0;
+      document.getElementById('status-completed').textContent = status.lastCompletedAt
+        ? new Date(status.lastCompletedAt).toLocaleString() : 'Never';
+      const error = document.getElementById('status-error');
+      error.textContent = status.lastError || '';
+      error.hidden = !status.lastError;
     };
     const saveWatcherConfig = async payload => {
       const response = await fetch('/api/watcher/config', {
@@ -123,6 +149,10 @@
     };
     fetch('/api/watcher/config').then(response => response.json()).then(showWatcherConfig)
       .catch(error => { message.textContent = error.message; });
+    setInterval(() => {
+      fetch('/api/watcher/config').then(response => response.json())
+        .then(config => showWatcherStatus(config.status)).catch(() => {});
+    }, 1000);
     toggle.addEventListener('click', () => {
       if (!watcherConfig) return;
       saveWatcherConfig({ enabled: !watcherConfig.enabled }).catch(error => { message.textContent = error.message; });
