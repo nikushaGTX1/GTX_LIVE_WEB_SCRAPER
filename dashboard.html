@@ -284,6 +284,14 @@
           return;
         }
         if (event.target.closest('.accept-button')) {
+          if (watcherConfig?.viewer?.role === 'manager') {
+            const button = event.target.closest('.accept-button');
+            const selected = button.classList.toggle('selected');
+            button.setAttribute('aria-pressed', String(selected));
+            row.classList.add('review-accepting');
+            setTimeout(() => row.classList.remove('review-accepting'), 650);
+            return;
+          }
           row.classList.add('review-accepting');
           commentRow.hidden = false;
           commentRow.querySelector('.review-comment').focus();

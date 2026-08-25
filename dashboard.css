@@ -313,6 +313,7 @@ tbody tr.review-accepted { box-shadow: inset 4px 0 #20a464; }
 
 .accept-button { background: #e5f7ed; color: #078247; }
 .accept-button:hover { background: #20a464; color: #fff; }
+.accept-button.selected { background: #20a464; color: #fff; box-shadow: 0 0 0 3px rgb(32 164 100 / 18%); }
 .reject-button { background: #ffebeb; color: #c52b2b; }
 .reject-button:hover { background: #db3434; color: #fff; }
 
