@@ -80,6 +80,8 @@ h1 {
   white-space: nowrap;
 }
 
+.viewer small { color: var(--primary); font-size: 10px; font-weight: 800; text-transform: uppercase; }
+
 .listing-count {
   display: flex;
   align-items: baseline;

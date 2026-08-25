@@ -112,6 +112,21 @@ DASHBOARD_USER=your_username
 DASHBOARD_PASSWORD=a_long_random_password
 ```
 
+For multiple individual logins, use `DASHBOARD_ACCOUNTS` instead of the two
+legacy variables. Store it as one JSON-line Railway variable:
+
+```json
+[{"email":"admin@example.com","password":"unique-admin-password","role":"admin","name":"Administrator"},{"email":"agent1@example.com","password":"unique-agent-password","role":"agent","agentId":"agent-user-id-1","name":"Agent 1"},{"email":"agent2@example.com","password":"unique-agent-password","role":"agent","agentId":"agent-user-id-2","name":"Agent 2"}]
+```
+
+Each email/password works in the browser sign-in popup (enter the email in its
+Username field). Admins see all apartments, scraper controls, and CSV downloads.
+Agents see only apartments whose `assigned_agent_id` matches their `agentId`, and
+server-side authorization blocks them from changing controls or downloading the
+full CSV. Dashboard passwords should be unique and should not reuse Website API
+account passwords. When `DASHBOARD_ACCOUNTS` is set, it replaces the legacy single
+`DASHBOARD_USER`/`DASHBOARD_PASSWORD` login.
+
 After deployment, generate a public domain under the service's Networking settings.
 The dashboard is at `/`, with CSV downloads at `/apartments.csv` and
 `/ss-apartments.csv`. The first hosted start creates a fresh silent baseline unless

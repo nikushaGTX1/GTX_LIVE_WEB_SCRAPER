@@ -197,12 +197,15 @@ function readJsonFile(filePath) {
   try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch { return {}; }
 }
 
-function writeDashboard() {
-  const combined = [
+function buildDashboard(viewer = null) {
+  let combined = [
     ...Object.values(readJsonFile(DATA_PATH)).map(item => ({ ...item, source: item.source || 'MyHome' })),
     ...Object.values(readJsonFile(SS_DATA_PATH)).map(item => ({ ...item, source: 'SS.ge' }))
   ].filter(item => !item._baseline && !item._excluded && !hasExcludedDescription(item.description))
     .sort((a, b) => String(b.first_seen).localeCompare(String(a.first_seen)));
+  if (viewer?.role === 'agent') {
+    combined = combined.filter(item => String(item.assigned_agent_id || '') === viewer.agentId);
+  }
 
   const rows = combined.map(item => `<tr data-district="${html(item.district || 'Other')}">
     <td><span class="source ${item.source === 'SS.ge' ? 'ss' : ''}">${html(item.source)}</span></td>
@@ -225,21 +228,50 @@ function writeDashboard() {
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
     .replace('{{LISTING_COUNT}}', String(combined.length))
-    .replace('{{LOGGED_IN_AS}}', html(process.env.DASHBOARD_DISPLAY_USER || process.env.WEBSITE_API_EMAIL || 'Local viewer'))
+    .replace('{{LOGGED_IN_AS}}', html(viewer?.name || viewer?.email || process.env.DASHBOARD_DISPLAY_USER || process.env.WEBSITE_API_EMAIL || 'Local viewer'))
+    .replace('{{LOGGED_IN_ROLE}}', html(viewer?.role || 'admin'))
     .replace('{{DASHBOARD_CONTENT}}', content);
+  return document;
+}
+
+function writeDashboard() {
+  const document = buildDashboard();
   fs.writeFileSync(DASHBOARD_PATH, document, 'utf8');
 }
 
-function dashboardAuthorized(request, response) {
-  const expectedUser = process.env.DASHBOARD_USER;
-  const expectedPassword = process.env.DASHBOARD_PASSWORD;
-  if (!expectedUser || !expectedPassword) return true;
+function dashboardAccounts() {
+  if (process.env.DASHBOARD_ACCOUNTS) {
+    let accounts;
+    try { accounts = JSON.parse(process.env.DASHBOARD_ACCOUNTS); } catch { throw new Error('DASHBOARD_ACCOUNTS must be valid JSON'); }
+    if (!Array.isArray(accounts)) throw new Error('DASHBOARD_ACCOUNTS must be a JSON array');
+    return accounts.map(account => ({
+      email: clean(account.email).toLowerCase(),
+      password: String(account.password || ''),
+      role: String(account.role || 'agent').toLowerCase() === 'admin' ? 'admin' : 'agent',
+      agentId: String(account.agentId || ''),
+      name: clean(account.name || account.email)
+    })).filter(account => account.email && account.password && (account.role === 'admin' || account.agentId));
+  }
+  if (process.env.DASHBOARD_USER && process.env.DASHBOARD_PASSWORD) {
+    return [{ email: process.env.DASHBOARD_USER.toLowerCase(), password: process.env.DASHBOARD_PASSWORD, role: 'admin', agentId: '', name: process.env.DASHBOARD_DISPLAY_USER || process.env.DASHBOARD_USER }];
+  }
+  return [];
+}
+
+function authenticateDashboard(request, response) {
+  const accounts = dashboardAccounts();
+  if (!accounts.length && !IS_HOSTED) return { email: 'local', role: 'admin', agentId: '', name: 'Local admin' };
   const supplied = request.headers.authorization || '';
-  const expected = `Basic ${Buffer.from(`${expectedUser}:${expectedPassword}`).toString('base64')}`;
-  if (supplied === expected) return true;
+  let credentials = '';
+  try { if (supplied.startsWith('Basic ')) credentials = Buffer.from(supplied.slice(6), 'base64').toString('utf8'); } catch { /* Reject below. */ }
+  const separator = credentials.indexOf(':');
+  const email = separator >= 0 ? credentials.slice(0, separator).toLowerCase() : '';
+  const password = separator >= 0 ? credentials.slice(separator + 1) : '';
+  const account = accounts.find(candidate => candidate.email === email && candidate.password === password);
+  if (account) return account;
   response.writeHead(401, { 'WWW-Authenticate': 'Basic realm="Apartment Watcher"' });
   response.end('Authentication required');
-  return false;
+  return null;
 }
 
 function readRequestJson(request) {
@@ -256,13 +288,15 @@ function readRequestJson(request) {
   });
 }
 
-function publicWatcherConfig() {
+function publicWatcherConfig(viewer = { role: 'admin' }) {
   return {
     enabled: watcherRuntime.enabled,
     pages: watcherRuntime.pages,
     interval: watcherRuntime.interval,
-    searches: watcherRuntime.searches,
-    status: watcherStatus
+    searches: viewer.role === 'admin' ? watcherRuntime.searches : [],
+    status: watcherStatus,
+    canAdmin: viewer.role === 'admin',
+    viewer: { email: viewer.email, name: viewer.name, role: viewer.role, agentId: viewer.agentId }
   };
 }
 
@@ -327,24 +361,33 @@ function startWebServer() {
       response.end(JSON.stringify({ ok: true }));
       return;
     }
-    if (!dashboardAuthorized(request, response)) return;
+    const viewer = authenticateDashboard(request, response);
+    if (!viewer) return;
     if (pathname === '/api/watcher/config' && request.method === 'GET') {
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-      response.end(JSON.stringify(publicWatcherConfig()));
+      response.end(JSON.stringify(publicWatcherConfig(viewer)));
       return;
     }
     if (pathname === '/api/watcher/config' && request.method === 'POST') {
-      if (IS_HOSTED && (!process.env.DASHBOARD_USER || !process.env.DASHBOARD_PASSWORD)) {
+      if (viewer.role !== 'admin') {
         response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
-        response.end(JSON.stringify({ error: 'Set DASHBOARD_USER and DASHBOARD_PASSWORD before enabling hosted admin controls' }));
+        response.end(JSON.stringify({ error: 'Admin access is required to change scraper settings' }));
         return;
       }
       await updateWatcherConfig(request, response);
       return;
     }
+    if ((pathname === '/' || pathname === '/live-results.html') && request.method === 'GET') {
+      response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store, max-age=0' });
+      response.end(buildDashboard(viewer));
+      return;
+    }
+    if ((pathname === '/apartments.csv' || pathname === '/ss-apartments.csv') && viewer.role !== 'admin') {
+      response.writeHead(403, { 'content-type': 'text/plain; charset=utf-8' });
+      response.end('Admin access is required for CSV downloads');
+      return;
+    }
     const files = {
-      '/': [DASHBOARD_PATH, 'text/html; charset=utf-8'],
-      '/live-results.html': [DASHBOARD_PATH, 'text/html; charset=utf-8'],
       '/dashboard.css': [DASHBOARD_CSS_PATH, 'text/css; charset=utf-8'],
       '/favicon.svg': [FAVICON_PATH, 'image/svg+xml'],
       '/favicon.ico': [FAVICON_PATH, 'image/svg+xml'],
@@ -1163,6 +1206,10 @@ async function scanSs(context, data, state) {
 async function main() {
   const options = parseArgs(process.argv.slice(2));
   watcherRuntime = loadWatcherConfig(options);
+  const accounts = dashboardAccounts();
+  if (IS_HOSTED && !accounts.length) {
+    throw new Error('Configure DASHBOARD_ACCOUNTS or DASHBOARD_USER/DASHBOARD_PASSWORD before starting the hosted dashboard');
+  }
   const data = loadData();
   const ssData = loadSsData();
   const state = loadState();
@@ -1176,6 +1223,7 @@ async function main() {
   console.log(`Saving results to ${CSV_PATH}`);
   console.log(`Saving SS.ge results to ${SS_CSV_PATH}`);
   console.log(`Watching MyHome districts: ${watcherRuntime.searches.map(search => search.district).join(', ')} (${watcherRuntime.pages} pages each).`);
+  console.log(`Dashboard accounts: ${accounts.length} (${accounts.filter(account => account.role === 'admin').length} admin, ${accounts.filter(account => account.role === 'agent').length} agent).`);
   console.log(process.env.WEBSITE_API_EMAIL && process.env.WEBSITE_API_PASSWORD
     ? `Website API upload enabled at ${WEBSITE_API_URL}.`
     : 'Website API upload disabled; set WEBSITE_API_EMAIL and WEBSITE_API_PASSWORD to enable it.');

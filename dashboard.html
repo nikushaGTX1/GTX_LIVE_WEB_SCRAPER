@@ -19,6 +19,7 @@
         <div class="viewer" aria-label="Current account">
           <span>Logged in as</span>
           <strong id="logged-in-as">{{LOGGED_IN_AS}}</strong>
+          <small id="logged-in-role">{{LOGGED_IN_ROLE}}</small>
         </div>
         <div class="listing-count" aria-label="New listing count">
           <strong id="listing-count">{{LISTING_COUNT}}</strong>
@@ -27,7 +28,7 @@
       </div>
     </header>
 
-    <section class="admin-controls" aria-labelledby="watcher-controls-title">
+    <section class="admin-controls" id="admin-controls" aria-labelledby="watcher-controls-title">
       <div class="control-heading">
         <div>
           <p class="eyebrow">Admin controls</p>
@@ -78,6 +79,7 @@
     // main.js replaces these markers with live data in live-results.html.
     const count = document.getElementById('listing-count');
     const viewer = document.getElementById('logged-in-as');
+    const viewerRole = document.getElementById('logged-in-role');
     const content = document.getElementById('dashboard-content');
     const toggle = document.getElementById('watcher-toggle');
     const form = document.getElementById('watcher-form');
@@ -85,6 +87,7 @@
     let watcherConfig = null;
     if (count.textContent.includes('{{LISTING_COUNT}}')) count.textContent = '0';
     if (viewer.textContent.includes('{{LOGGED_IN_AS}}')) viewer.textContent = 'Template preview';
+    if (viewerRole.textContent.includes('{{LOGGED_IN_ROLE}}')) viewerRole.textContent = 'admin';
     if (content.textContent.includes('{{DASHBOARD_CONTENT}}')) {
       content.innerHTML = '<div class="empty">Template preview — run the scraper to see live apartments.</div>';
     }
@@ -109,6 +112,7 @@
 
     const showWatcherConfig = config => {
       watcherConfig = config;
+      document.getElementById('admin-controls').hidden = !config.canAdmin;
       toggle.textContent = config.enabled ? 'Stop scraper' : 'Start scraper';
       toggle.classList.toggle('running', config.enabled);
       document.getElementById('refresh-status').textContent = config.enabled
