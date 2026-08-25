@@ -70,6 +70,8 @@ let ssAuthToken = '';
 let websiteApiToken = '';
 let websiteApiAgents = [];
 let watcherRuntime = null;
+let liveMyHomeData = null;
+let liveSsData = null;
 const watcherStatus = {
   state: 'starting', message: 'Starting scraper…', found: 0, imported: 0,
   importTotal: 0, lastStartedAt: null, lastCompletedAt: null, lastError: null
@@ -204,13 +206,13 @@ function buildDashboard(viewer = null) {
   let combined = [
     ...Object.values(readJsonFile(DATA_PATH)).map(item => ({ ...item, source: item.source || 'MyHome' })),
     ...Object.values(readJsonFile(SS_DATA_PATH)).map(item => ({ ...item, source: 'SS.ge' }))
-  ].filter(item => !item._baseline && !item._excluded && !hasExcludedDescription(item.description))
+  ].filter(item => !item._baseline && !item._excluded && item._review_status !== 'rejected' && !hasExcludedDescription(item.description))
     .sort((a, b) => String(b.first_seen).localeCompare(String(a.first_seen)));
   if (viewer?.role === 'agent') {
     combined = combined.filter(item => String(item.assigned_agent_id || '') === viewer.agentId);
   }
 
-  const rows = combined.map(item => `<tr data-district="${html(item.district || 'Other')}">
+  const rows = combined.map(item => `<tr data-apartment-id="${html(item.apartment_id)}" data-district="${html(item.district || 'Other')}" class="${item._review_status === 'accepted' ? 'review-accepted' : ''}">
     <td><span class="source ${item.source === 'SS.ge' ? 'ss' : ''}">${html(item.source)}</span></td>
     <td>${html(item.district || 'Other')}</td>
     <td>${html(item.assigned_agent_id || 'Pending')}</td>
@@ -221,13 +223,23 @@ function buildDashboard(viewer = null) {
     <td>${html(item.rooms)}</td><td>${html(item.area_m2)}</td>
     <td>${html(item.floor)}${item.total_floors ? `/${html(item.total_floors)}` : ''}</td>
     <td>${html(item.address)}</td>
+    <td class="review-cell">
+      <div class="review-buttons">
+        <button class="review-button accept-button" type="button" title="Accept and comment" aria-label="Accept apartment">✓</button>
+        <button class="review-button reject-button" type="button" title="Reject apartment" aria-label="Reject apartment">×</button>
+      </div>
+      <div class="comment-dropdown" ${item._review_status === 'accepted' ? '' : 'hidden'}>
+        <textarea class="review-comment" rows="3" placeholder="Type a comment…">${html(item._review_comment || '')}</textarea>
+        <button class="save-comment" type="button">Save comment</button>
+      </div>
+    </td>
   </tr>`).join('\n');
 
   if (!fs.existsSync(DASHBOARD_TEMPLATE_PATH)) {
     throw new Error(`Dashboard template is missing: ${DASHBOARD_TEMPLATE_PATH}`);
   }
   const content = combined.length
-    ? `<table><thead><tr><th>Source</th><th>District</th><th>Assigned agent</th><th>Uploaded</th><th>ID</th><th>Price</th><th>Phone</th><th>Rooms</th><th>m²</th><th>Floor</th><th>Address</th></tr></thead><tbody>${rows}</tbody></table>`
+    ? `<table><thead><tr><th>Source</th><th>District</th><th>Assigned agent</th><th>Uploaded</th><th>ID</th><th>Price</th><th>Phone</th><th>Rooms</th><th>m²</th><th>Floor</th><th>Address</th><th>Review</th></tr></thead><tbody>${rows}</tbody></table>`
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
     .replace('{{LISTING_COUNT}}', String(combined.length))
@@ -417,6 +429,40 @@ async function updateWatcherConfig(request, response) {
   }
 }
 
+async function reviewApartment(request, response, viewer, apartmentId) {
+  try {
+    if (!/^\d+$/.test(apartmentId)) throw new Error('Invalid apartment ID');
+    const body = await readRequestJson(request);
+    if (!['accepted', 'rejected'].includes(body.action)) throw new Error('Action must be accepted or rejected');
+    const comment = clean(body.comment || '').slice(0, 2000);
+    const myHomeData = liveMyHomeData || loadData();
+    const ssData = liveSsData || loadSsData();
+    const data = myHomeData[apartmentId] ? myHomeData : ssData;
+    const item = data[apartmentId];
+    if (!item) {
+      response.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ error: 'Apartment not found' }));
+      return;
+    }
+    if (viewer.role !== 'admin' && String(item.assigned_agent_id || '') !== String(viewer.agentId || '')) {
+      response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ error: 'This apartment is assigned to another agent' }));
+      return;
+    }
+    item._review_status = body.action;
+    item._review_comment = comment;
+    item._reviewed_by = viewer.email;
+    item._reviewed_at = new Date().toISOString();
+    if (data === myHomeData) saveData(data);
+    else saveData(data, SS_DATA_PATH, SS_CSV_PATH);
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ ok: true, status: item._review_status, comment: item._review_comment }));
+  } catch (error) {
+    response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ error: error.message }));
+  }
+}
+
 function startWebServer() {
   const port = Number(process.env.PORT || 3000);
   const server = http.createServer(async (request, response) => {
@@ -445,6 +491,11 @@ function startWebServer() {
     if ((pathname === '/' || pathname === '/live-results.html') && request.method === 'GET') {
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store, max-age=0' });
       response.end(buildDashboard(viewer));
+      return;
+    }
+    const reviewMatch = pathname.match(/^\/api\/apartments\/(\d+)\/review$/);
+    if (reviewMatch && request.method === 'POST') {
+      await reviewApartment(request, response, viewer, reviewMatch[1]);
       return;
     }
     if ((pathname === '/apartments.csv' || pathname === '/ss-apartments.csv') && viewer.role !== 'admin') {
@@ -498,7 +549,7 @@ function saveData(data, dataPath = DATA_PATH, csvPath = CSV_PATH) {
   fs.renameSync(tempPath, dataPath);
 
   const rows = Object.values(data)
-    .filter(row => !row._baseline && !row._excluded && !hasExcludedDescription(row.description))
+    .filter(row => !row._baseline && !row._excluded && row._review_status !== 'rejected' && !hasExcludedDescription(row.description))
     .sort((a, b) => String(b.first_seen).localeCompare(String(a.first_seen)));
   const csv = [FIELDS.map(csvCell).join(',')];
   for (const row of rows) csv.push(FIELDS.map(field => csvCell(row[field])).join(','));
@@ -1340,6 +1391,8 @@ async function main() {
   }
   const data = loadData();
   const ssData = loadSsData();
+  liveMyHomeData = data;
+  liveSsData = ssData;
   const state = loadState();
   const excludedMyHome = markExcludedDescriptions(data);
   const excludedSs = markExcludedDescriptions(ssData);

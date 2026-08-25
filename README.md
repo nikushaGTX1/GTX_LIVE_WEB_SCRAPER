@@ -41,6 +41,12 @@ round-robin order. A street-catalog or network error therefore does not leave th
 dashboard owner as `Pending`; the same agent is retained while the API upload
 retries. Before creating the API apartment, its address is resolved through
 `/api/Locations/resolve-street` and the required canonical `StreetId` is submitted.
+
+Agents can review their assigned rows with a green checkmark or red ×. Rejecting
+plays a red removal animation and persistently hides the apartment. Accepting
+plays a green animation, opens a comment editor, and stores the comment plus the
+reviewing account and time. The server prevents agents from reviewing another
+agent's apartment; admins may review any row.
 The Stop button safely ends an active import after its current apartment, retains
 all completed work, leaves remaining IDs ready for the next Start, and pauses the
 dashboard's three-second page refresh until scraping is started again.

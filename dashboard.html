@@ -86,6 +86,7 @@
     const form = document.getElementById('watcher-form');
     const message = document.getElementById('watcher-message');
     let watcherConfig = null;
+    let reviewInteractionUntil = 0;
     if (count.textContent.includes('{{LISTING_COUNT}}')) count.textContent = '0';
     if (viewer.textContent.includes('{{LOGGED_IN_AS}}')) viewer.textContent = 'Template preview';
     if (viewerRole.textContent.includes('{{LOGGED_IN_ROLE}}')) viewerRole.textContent = 'admin';
@@ -193,8 +194,51 @@
       }).then(() => { document.getElementById('watcher-url').value = ''; })
         .catch(error => { message.textContent = error.message; });
     });
+    const saveReview = async (row, action, comment = '') => {
+      const response = await fetch(`/api/apartments/${row.dataset.apartmentId}/review`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ action, comment })
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Could not save apartment review');
+      return result;
+    };
+    document.getElementById('dashboard-content').addEventListener('click', async event => {
+      const row = event.target.closest('tr[data-apartment-id]');
+      if (!row) return;
+      reviewInteractionUntil = Date.now() + 10000;
+      try {
+        if (event.target.closest('.reject-button')) {
+          if (!confirm('Reject and remove this apartment from your list?')) return;
+          await saveReview(row, 'rejected');
+          row.classList.add('review-rejecting');
+          setTimeout(() => row.remove(), 450);
+          return;
+        }
+        if (event.target.closest('.accept-button')) {
+          const dropdown = row.querySelector('.comment-dropdown');
+          const comment = row.querySelector('.review-comment').value;
+          await saveReview(row, 'accepted', comment);
+          row.classList.add('review-accepting', 'review-accepted');
+          dropdown.hidden = false;
+          row.querySelector('.review-comment').focus();
+          setTimeout(() => row.classList.remove('review-accepting'), 650);
+          return;
+        }
+        if (event.target.closest('.save-comment')) {
+          const comment = row.querySelector('.review-comment').value;
+          await saveReview(row, 'accepted', comment);
+          row.classList.add('review-accepting', 'review-accepted');
+          setTimeout(() => row.classList.remove('review-accepting'), 650);
+        }
+      } catch (error) {
+        alert(error.message);
+      }
+    });
     setInterval(() => {
-      if (watcherConfig?.enabled && !document.activeElement.closest?.('.admin-controls')) location.reload();
+      const editingReview = document.activeElement.closest?.('.review-cell');
+      if (watcherConfig?.enabled && !editingReview && Date.now() > reviewInteractionUntil && !document.activeElement.closest?.('.admin-controls')) location.reload();
     }, 3000);
   </script>
 </body>

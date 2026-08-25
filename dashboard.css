@@ -258,7 +258,7 @@ h1 {
   box-shadow: var(--shadow);
 }
 
-table { width: 100%; min-width: 1050px; border-collapse: collapse; }
+table { width: 100%; min-width: 1250px; border-collapse: collapse; }
 
 th, td {
   padding: 13px 14px;
@@ -280,6 +280,58 @@ th {
 
 tbody tr:last-child td { border-bottom: 0; }
 tbody tr:hover { background: #f7fbff; }
+tbody tr.review-accepted { box-shadow: inset 4px 0 #20a464; }
+
+.review-cell { min-width: 150px; white-space: normal; }
+.review-buttons { display: flex; gap: 7px; }
+
+.review-button {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 9px;
+  cursor: pointer;
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1;
+}
+
+.accept-button { background: #e5f7ed; color: #078247; }
+.accept-button:hover { background: #20a464; color: #fff; }
+.reject-button { background: #ffebeb; color: #c52b2b; }
+.reject-button:hover { background: #db3434; color: #fff; }
+
+.comment-dropdown {
+  display: grid;
+  gap: 7px;
+  width: 250px;
+  margin-top: 9px;
+  padding: 9px;
+  border: 1px solid #bce5ce;
+  border-radius: 10px;
+  background: #f2fbf6;
+}
+
+.comment-dropdown[hidden] { display: none; }
+.review-comment { resize: vertical; min-height: 64px; padding: 8px; border: 1px solid #b8d8c6; border-radius: 8px; font: inherit; }
+.review-comment:focus { border-color: #20a464; outline: 3px solid rgb(32 164 100 / 12%); }
+.save-comment { justify-self: end; padding: 7px 10px; border: 0; border-radius: 7px; background: #168653; color: #fff; cursor: pointer; font-weight: 700; }
+
+tr.review-accepting { animation: accept-flash 650ms ease; }
+tr.review-rejecting { animation: reject-away 450ms ease forwards; pointer-events: none; }
+
+@keyframes accept-flash {
+  0% { background: #fff; }
+  45% { background: #c9f3da; transform: scale(1.005); }
+  100% { background: #fff; transform: scale(1); }
+}
+
+@keyframes reject-away {
+  0% { background: #fff; opacity: 1; transform: translateX(0); }
+  45% { background: #ffd4d4; }
+  100% { background: #ffbebe; opacity: 0; transform: translateX(40px); }
+}
 a { color: var(--primary); text-decoration: none; }
 a:hover { text-decoration: underline; }
 .price { font-weight: 700; }
