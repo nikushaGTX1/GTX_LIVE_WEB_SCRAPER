@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="refresh" content="3">
+  <title>Live Apartment Results</title>
+  <link rel="stylesheet" href="dashboard.css">
+</head>
+<body>
+  <main class="dashboard">
+    <header class="dashboard-header">
+      <div>
+        <p class="eyebrow">MyHome &amp; SS.ge watcher</p>
+        <h1>Live Apartment Results</h1>
+        <p class="status">Auto-refreshes every 3 seconds</p>
+      </div>
+      <div class="listing-count" aria-label="New listing count">
+        <strong id="listing-count">{{LISTING_COUNT}}</strong>
+        <span>new listings</span>
+      </div>
+    </header>
+
+    <nav class="district-filters" aria-label="Filter apartments by district">
+      <button class="district-filter active" type="button" data-district="all">All</button>
+      <button class="district-filter" type="button" data-district="Saburtalo">Saburtalo</button>
+      <button class="district-filter" type="button" data-district="Vake">Vake</button>
+      <button class="district-filter" type="button" data-district="Didi Dighomi">Didi Dighomi</button>
+      <button class="district-filter" type="button" data-district="Digomi">Digomi</button>
+    </nav>
+
+    <section class="results" id="dashboard-content" aria-label="Apartment results">
+      {{DASHBOARD_CONTENT}}
+    </section>
+  </main>
+  <script>
+    // Keep the editable template presentable when it is opened directly.
+    // main.js replaces these markers with live data in live-results.html.
+    const count = document.getElementById('listing-count');
+    const content = document.getElementById('dashboard-content');
+    if (count.textContent.includes('{{LISTING_COUNT}}')) count.textContent = '0';
+    if (content.textContent.includes('{{DASHBOARD_CONTENT}}')) {
+      content.innerHTML = '<div class="empty">Template preview — run the scraper to see live apartments.</div>';
+    }
+    const applyDistrict = district => {
+      document.querySelectorAll('.district-filter').forEach(item => {
+        item.classList.toggle('active', item.dataset.district === district);
+      });
+      document.querySelectorAll('tbody tr[data-district]').forEach(row => {
+        row.hidden = district !== 'all' && row.dataset.district !== district;
+      });
+    };
+    document.querySelectorAll('.district-filter').forEach(button => {
+      button.addEventListener('click', () => {
+        localStorage.setItem('apartment-district', button.dataset.district);
+        applyDistrict(button.dataset.district);
+      });
+    });
+    const savedDistrict = localStorage.getItem('apartment-district') || 'all';
+    const knownDistrict = [...document.querySelectorAll('.district-filter')]
+      .some(button => button.dataset.district === savedDistrict);
+    applyDistrict(knownDistrict ? savedDistrict : 'all');
+  </script>
+</body>
+</html>

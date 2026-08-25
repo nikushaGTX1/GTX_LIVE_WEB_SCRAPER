@@ -1,6 +1,6 @@
 # MyHome new-apartment watcher
 
-This program watches the supplied MyHome.ge Saburtalo rental search and the
+This program watches the supplied MyHome.ge Didi Dighomi rental search and the
 configured SS.ge owner-only Vake-Saburtalo rental search. It opens every previously
 unseen listing, reveals the publicly available contact phone, and saves:
 
@@ -17,6 +17,11 @@ MyHome results are stored in `apartments.csv`; SS.ge results are stored in
 The Chrome window shows `live-results.html`, which refreshes itself every three
 seconds so newly found rows appear without reopening Excel.
 
+Edit `dashboard.html` and `dashboard.css` to change the dashboard design. The
+generated `live-results.html` is rebuilt automatically and should not be edited.
+Open `live-results.html` (or `http://localhost:3000`) to view real scraper data;
+opening `dashboard.html` directly shows only a design preview.
+
 ## Start
 
 Double-click **run.bat**. On its first run it installs Chromium, so setup can take
@@ -25,7 +30,7 @@ complete it once; the browser profile is kept in `.browser-profile` for later ru
 
 The first check silently records the current results as a baseline. It does not
 open, announce, or export those older listings. Every five seconds the watcher
-merges MyHome's first three feed segments, which cover S-VIP, VIP+, VIP, and the
+merges MyHome's first five filtered result pages, including S-VIP, VIP+, VIP, and the
 newest ordinary listings. It uses the exact listing ID and original listing age,
 not visual position, so old promoted/pinned results are ignored. Press Ctrl+C in
 the terminal to stop.
@@ -37,8 +42,38 @@ After setup, examples from this folder:
 ```powershell
 node main.js --once
 node main.js --interval 300 --pages 2
-node main.js --url "https://www.myhome.ge/your-search-url"
+node main.js --url "https://www.myhome.ge/your-search-url" --pages 5
 ```
+
+Paste the complete URL after applying any filters on MyHome. The watcher passes
+all query-string filters to every page and changes only the `page` value. It scans
+five pages by default; `--pages` accepts values from 1 through 10. Changing the
+URL or page count creates a fresh baseline for that search, preventing older ads
+from being announced as newly posted.
+
+By default, MyHome scans five pages each for Saburtalo, Vake, Didi Dighomi, and
+Digomi. The dashboard buttons filter saved results by those districts.
+
+## Website API integration
+
+New MyHome apartments can be uploaded to the Website API and distributed in a
+stable round-robin across all configured agents. Set:
+
+```text
+WEBSITE_API_URL=https://websiteapi-production-c970.up.railway.app
+WEBSITE_API_EMAIL=agent@example.com
+WEBSITE_API_PASSWORD=your_password
+WEBSITE_API_AGENT_IDS=agent-id-1,agent-id-2,agent-id-3,agent-id-4,agent-id-5,agent-id-6,agent-id-7,agent-id-8
+```
+
+The account must be able to log in and access both `/api/Agents` and
+`/api/Apartments`. Uploaded records store their assigned agent locally, and failed
+uploads are retried. If the credentials are omitted, API uploading is disabled.
+Set `WEBSITE_API_AGENT_IDS` to control which agents participate and their assignment
+order. Any positive number of agents is supported. If omitted, every agent returned
+by `/api/Agents` is used. The scraper dashboard shows all apartments and the agent
+ID assigned to each one; API-wide admin visibility is governed by the admin account's
+permissions in the Website API.
 
 Do not poll aggressively. MyHome can change its layout or access controls; the
 scraper reports individual listings it cannot parse and continues watching.

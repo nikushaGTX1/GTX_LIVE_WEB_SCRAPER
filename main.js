@@ -6,7 +6,13 @@ const path = require('node:path');
 const { pathToFileURL } = require('node:url');
 const { chromium } = require('playwright');
 
-const DEFAULT_URL = 'https://www.myhome.ge/udzravi-qoneba/qiravdeba/bina/tbilisi/saburtalo/?deal_types=2&real_estate_types=1&cities=1&urbans=47&districts=4&currency_id=1&CardView=1&page=1&owner_type=physical';
+const DISTRICT_SEARCHES = [
+  { district: 'Saburtalo', url: 'https://www.myhome.ge/udzravi-qoneba/qiravdeba/bina/tbilisi/saburtalo/?deal_types=2&real_estate_types=1&cities=1&urbans=47&districts=4&currency_id=1&CardView=1&page=1&owner_type=physical' },
+  { district: 'Vake', url: 'https://www.myhome.ge/udzravi-qoneba/qiravdeba/bina/tbilisi/vake/?deal_types=2&real_estate_types=1&cities=1&urbans=38&districts=4&currency_id=1&CardView=1&page=1&owner_type=physical' },
+  { district: 'Didi Dighomi', url: 'https://www.myhome.ge/udzravi-qoneba/qiravdeba/bina/tbilisi/didi-dighomi/?deal_types=2&real_estate_types=1&cities=1&urbans=29&districts=4&currency_id=1&CardView=1&page=1&owner_type=physical' },
+  { district: 'Digomi', url: 'https://www.myhome.ge/udzravi-qoneba/qiravdeba/bina/tbilisi/digomi/?deal_types=2&real_estate_types=1&cities=1&urbans=24&districts=4&currency_id=1&CardView=1&page=1&owner_type=physical' }
+];
+const WEBSITE_API_URL = process.env.WEBSITE_API_URL || 'https://websiteapi-production-c970.up.railway.app';
 const SS_URL = 'https://home.ss.ge/ka/udzravi-qoneba/l/bina/qiravdeba?cityIdList=95&subdistrictIds=2%2C3%2C4%2C5%2C26%2C27%2C44%2C45%2C46%2C47%2C48%2C49%2C50&currencyId=1&advancedSearch=%7B%22individualEntityOnly%22%3Atrue%7D';
 const ROOT = __dirname;
 const DATA_ROOT = process.env.DATA_DIR || process.env.RAILWAY_VOLUME_MOUNT_PATH || ROOT;
@@ -16,6 +22,8 @@ const CSV_PATH = path.join(DATA_ROOT, 'apartments.csv');
 const SS_DATA_PATH = path.join(DATA_ROOT, 'ss-apartments.json');
 const SS_CSV_PATH = path.join(DATA_ROOT, 'ss-apartments.csv');
 const DASHBOARD_PATH = path.join(DATA_ROOT, 'live-results.html');
+const DASHBOARD_TEMPLATE_PATH = path.join(ROOT, 'dashboard.html');
+const DASHBOARD_CSS_PATH = path.join(ROOT, 'dashboard.css');
 const STATE_PATH = path.join(DATA_ROOT, 'watcher-state.json');
 const PROFILE_PATH = process.env.WATCHER_PROFILE || path.join(DATA_ROOT, '.browser-profile');
 const IS_HOSTED = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID);
@@ -40,7 +48,7 @@ const EXCLUDED_DESCRIPTION_PHRASES = [
 ];
 
 const FIELDS = [
-  'apartment_id', 'title', 'phone', 'price', 'rooms', 'bedrooms', 'area_m2',
+  'apartment_id', 'district', 'assigned_agent_id', 'title', 'phone', 'price', 'rooms', 'bedrooms', 'area_m2',
   'floor', 'total_floors', 'address', 'posted', 'description', 'url', 'first_seen'
 ];
 // MyHome has used both /udzravi-qoneba/25764728/... and
@@ -56,6 +64,8 @@ const PRICE_RE = /(?:[$€₾]\s*[\d,.]+|[\d,.]+\s*(?:₾|GEL|USD|EUR|ლარ�
 const DATE_RE = /(?:\d{1,2}[:.]\d{2}|\d{1,2}\s+(?:იან|თებ|მარ|აპრ|მაი|ივნ|ივლ|აგვ|სექ|ოქტ|ნოე|დეკ|Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec))/i;
 const REVEAL_RE = /(ტელეფონ|ნომრის ნახვა|ნომერი|show phone|show number|phone|показать номер|телефон)/i;
 let ssAuthToken = '';
+let websiteApiToken = '';
+let websiteApiAgents = [];
 
 function clean(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -104,16 +114,16 @@ function sleep(ms) {
 }
 
 function parseArgs(argv) {
-  const options = { url: DEFAULT_URL, interval: 5, pages: 3, once: false, headless: false };
+  const options = { searches: DISTRICT_SEARCHES, interval: 5, pages: 5, once: false, headless: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--once') options.once = true;
     else if (arg === '--headless') options.headless = true;
-    else if (arg === '--url') options.url = argv[++i];
+    else if (arg === '--url') options.searches = [{ district: 'Custom', url: argv[++i] }];
     else if (arg === '--interval') options.interval = Number(argv[++i]);
     else if (arg === '--pages') options.pages = Number(argv[++i]);
     else if (arg === '--help' || arg === '-h') {
-      console.log('Usage: node main.js [--once] [--interval 5] [--pages 3] [--url URL] [--headless]');
+      console.log('Usage: node main.js [--once] [--interval 5] [--pages 5] [--url URL] [--headless]');
       process.exit(0);
     } else {
       throw new Error(`Unknown option: ${arg}`);
@@ -187,8 +197,10 @@ function writeDashboard() {
   ].filter(item => !item._baseline && !item._excluded && !hasExcludedDescription(item.description))
     .sort((a, b) => String(b.first_seen).localeCompare(String(a.first_seen)));
 
-  const rows = combined.map(item => `<tr>
+  const rows = combined.map(item => `<tr data-district="${html(item.district || 'Other')}">
     <td><span class="source ${item.source === 'SS.ge' ? 'ss' : ''}">${html(item.source)}</span></td>
+    <td>${html(item.district || 'Other')}</td>
+    <td>${html(item.assigned_agent_id || 'Pending')}</td>
     <td>${html(item.posted || item.first_seen)}</td>
     <td><a href="${html(item.url)}" target="_blank">${html(item.apartment_id)}</a></td>
     <td class="price">${html(item.price)}</td>
@@ -198,20 +210,15 @@ function writeDashboard() {
     <td>${html(item.address)}</td>
   </tr>`).join('\n');
 
-  const document = `<!doctype html><html lang="en"><head><meta charset="utf-8">
-  <meta http-equiv="refresh" content="3"><meta name="viewport" content="width=device-width,initial-scale=1">
-  <title>Live Apartment Results</title><style>
-  body{font-family:Segoe UI,Arial,sans-serif;background:#f5f7fb;color:#172033;margin:0;padding:24px}
-  h1{margin:0 0 6px;font-size:25px}.status{color:#607089;margin-bottom:18px}
-  .wrap{overflow:auto;background:#fff;border-radius:12px;box-shadow:0 3px 18px #1c315214}
-  table{width:100%;border-collapse:collapse;min-width:1050px}th,td{padding:11px 12px;border-bottom:1px solid #e8edf4;text-align:left;white-space:nowrap}
-  th{position:sticky;top:0;background:#eef3fa;color:#40516a;font-size:12px;text-transform:uppercase}
-  tr:hover{background:#f7fbff}a{color:#0866d9;text-decoration:none}.price{font-weight:700}
-  .source{background:#ecf4ff;color:#075bb9;border-radius:12px;padding:4px 8px;font-weight:600}.source.ss{background:#fff0e4;color:#a84a00}
-  .empty{padding:35px;text-align:center;color:#607089}</style></head><body>
-  <h1>Live Apartment Results</h1><div class="status">Auto-refreshes every 3 seconds · ${combined.length} new listing(s)</div>
-  <div class="wrap">${combined.length ? `<table><thead><tr><th>Source</th><th>Uploaded</th><th>ID</th><th>Price</th><th>Phone</th><th>Rooms</th><th>m²</th><th>Floor</th><th>Address</th></tr></thead><tbody>${rows}</tbody></table>` : '<div class="empty">Waiting for a new apartment…</div>'}</div>
-  </body></html>`;
+  if (!fs.existsSync(DASHBOARD_TEMPLATE_PATH)) {
+    throw new Error(`Dashboard template is missing: ${DASHBOARD_TEMPLATE_PATH}`);
+  }
+  const content = combined.length
+    ? `<table><thead><tr><th>Source</th><th>District</th><th>Assigned agent</th><th>Uploaded</th><th>ID</th><th>Price</th><th>Phone</th><th>Rooms</th><th>m²</th><th>Floor</th><th>Address</th></tr></thead><tbody>${rows}</tbody></table>`
+    : '<div class="empty">Waiting for a new apartment…</div>';
+  const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
+    .replace('{{LISTING_COUNT}}', String(combined.length))
+    .replace('{{DASHBOARD_CONTENT}}', content);
   fs.writeFileSync(DASHBOARD_PATH, document, 'utf8');
 }
 
@@ -240,6 +247,7 @@ function startWebServer() {
     const files = {
       '/': [DASHBOARD_PATH, 'text/html; charset=utf-8'],
       '/live-results.html': [DASHBOARD_PATH, 'text/html; charset=utf-8'],
+      '/dashboard.css': [DASHBOARD_CSS_PATH, 'text/css; charset=utf-8'],
       '/apartments.csv': [CSV_PATH, 'text/csv; charset=utf-8'],
       '/ss-apartments.csv': [SS_CSV_PATH, 'text/csv; charset=utf-8']
     };
@@ -317,13 +325,25 @@ function apiUrl(searchUrl, pageNumber) {
   const source = new URL(searchUrl);
   const target = new URL('https://api-statements.tnet.ge/v1/statements');
   for (const [key, value] of source.searchParams) {
-    if (key.toLowerCase() !== 'cardview') target.searchParams.set(key, value);
+    const normalizedKey = key.toLowerCase();
+    if (normalizedKey !== 'cardview' && normalizedKey !== 'page') {
+      target.searchParams.append(key, value);
+    }
   }
   target.searchParams.set('page', String(pageNumber));
   return target.toString();
 }
 
-async function collectApiCards(searchUrl, pageCount) {
+function searchKey(searchUrl, pageCount) {
+  const url = new URL(searchUrl);
+  url.hash = '';
+  url.searchParams.delete('page');
+  url.searchParams.delete('CardView');
+  url.searchParams.sort();
+  return `${url.toString()}|pages=${pageCount}`;
+}
+
+async function collectApiCards(searchUrl, pageCount, district = 'Unknown') {
   const requests = [];
   for (let number = 1; number <= pageCount; number += 1) {
     requests.push(fetch(apiUrl(searchUrl, number), {
@@ -347,12 +367,24 @@ async function collectApiCards(searchUrl, pageCount) {
       const slug = item.dynamic_slug || item.href_lang?.ka || item.middle_slug || 'gancxadeba';
       byId.set(id, {
         id,
+        district,
         url: `https://www.myhome.ge/udzravi-qoneba/${slug}-${id}/`,
         text: `${item.dynamic_title || ''} ${item.last_updated || ''}`,
         api: item
       });
     }
   }
+  return [...byId.values()].sort((a, b) =>
+    String(b.api.last_updated || '').localeCompare(String(a.api.last_updated || ''))
+  );
+}
+
+async function collectDistrictCards(searches, pageCount) {
+  const groups = await Promise.all(searches.map(search =>
+    collectApiCards(search.url, pageCount, search.district)
+  ));
+  const byId = new Map();
+  for (const card of groups.flat()) if (!byId.has(card.id)) byId.set(card.id, card);
   return [...byId.values()].sort((a, b) =>
     String(b.api.last_updated || '').localeCompare(String(a.api.last_updated || ''))
   );
@@ -377,10 +409,11 @@ function myHomeUrl(source, id) {
   return `https://www.myhome.ge/udzravi-qoneba/${slug}-${id}/`;
 }
 
-function myHomeApartment(source, id, phone, firstSeen = new Date().toISOString()) {
+function myHomeApartment(source, id, phone, firstSeen = new Date().toISOString(), district = '') {
   const gel = source.price?.['1']?.price_total;
   return {
     apartment_id: id,
+    district,
     source: 'MyHome',
     title: clean(source.dynamic_title),
     phone,
@@ -587,7 +620,7 @@ async function extractDetail(page, card) {
         phone = await extractPhone(page);
       }
     }
-    return myHomeApartment(source, card.id, phone);
+    return myHomeApartment(source, card.id, phone, new Date().toISOString(), card.district);
   }
 
   await page.goto(card.url, { waitUntil: 'domcontentloaded', timeout: 90000 });
@@ -621,6 +654,7 @@ async function extractDetail(page, card) {
   const titleRooms = match(ROOM_RE, title);
   return {
     apartment_id: card.id,
+    district: card.district,
     title,
     phone: await extractPhone(page),
     price,
@@ -641,6 +675,146 @@ function notify(item) {
   console.log(`NEW ${item.source || 'MyHome'}  ID ${item.apartment_id} | ${item.price || '?'} | ${item.rooms || '?'} rooms | ${item.area_m2 || '?'} m² | ${item.phone || 'no phone found'}`);
   console.log(`     ${item.title}\n     ${item.url}`);
   process.stdout.write('\x07');
+}
+
+function responseItems(payload) {
+  if (Array.isArray(payload)) return payload;
+  for (const key of ['data', 'items', 'results', 'agents', 'apartments', '$values']) {
+    if (Array.isArray(payload?.[key])) return payload[key];
+    if (Array.isArray(payload?.[key]?.items)) return payload[key].items;
+  }
+  return [];
+}
+
+async function websiteApiRequest(pathname, options = {}, retry = true) {
+  const headers = new Headers(options.headers || {});
+  if (websiteApiToken) headers.set('authorization', `Bearer ${websiteApiToken}`);
+  const response = await fetch(`${WEBSITE_API_URL}${pathname}`, { ...options, headers });
+  if (response.status === 401 && retry && process.env.WEBSITE_API_EMAIL && process.env.WEBSITE_API_PASSWORD) {
+    websiteApiToken = '';
+    websiteApiAgents = [];
+    await loginWebsiteApi();
+    return websiteApiRequest(pathname, options, false);
+  }
+  if (!response.ok) {
+    const details = clean(await response.text().catch(() => '')).slice(0, 500);
+    throw new Error(`Website API ${pathname} returned HTTP ${response.status}${details ? `: ${details}` : ''}`);
+  }
+  const text = await response.text();
+  return text ? JSON.parse(text) : {};
+}
+
+async function loginWebsiteApi() {
+  const email = process.env.WEBSITE_API_EMAIL;
+  const password = process.env.WEBSITE_API_PASSWORD;
+  if (!email || !password) return false;
+  const response = await fetch(`${WEBSITE_API_URL}/api/Auth/login`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ email, password })
+  });
+  if (!response.ok) throw new Error(`Website API login returned HTTP ${response.status}`);
+  const payload = await response.json();
+  websiteApiToken = payload.token || payload.accessToken || payload.access_token || payload.jwt || payload.data?.token || payload.data?.accessToken || '';
+  if (!websiteApiToken) throw new Error('Website API login response did not contain a bearer token');
+  return true;
+}
+
+async function getDistributionAgents() {
+  if (websiteApiAgents.length) return websiteApiAgents;
+  if (!websiteApiToken && !await loginWebsiteApi()) return [];
+  const payload = await websiteApiRequest('/api/Agents');
+  const available = responseItems(payload)
+    .map(agent => ({ ...agent, id: String(agent.userId ?? agent.user_id ?? agent.id ?? '') }))
+    .filter(agent => agent.id)
+    .sort((a, b) => a.id.localeCompare(b.id));
+  const configuredIds = String(process.env.WEBSITE_API_AGENT_IDS || '')
+    .split(',').map(value => value.trim()).filter(Boolean);
+  websiteApiAgents = configuredIds.length
+    ? configuredIds.map(id => available.find(agent => agent.id === id)).filter(Boolean)
+    : available;
+  if (!websiteApiAgents.length) {
+    throw new Error('Website API returned no agents for apartment distribution');
+  }
+  if (configuredIds.length && websiteApiAgents.length !== configuredIds.length) {
+    const found = new Set(websiteApiAgents.map(agent => agent.id));
+    const missing = configuredIds.filter(id => !found.has(id));
+    throw new Error(`Configured Website API agent IDs were not found: ${missing.join(', ')}`);
+  }
+  return websiteApiAgents;
+}
+
+function positiveNumber(value) {
+  const number = Number(String(value ?? '').replace(/[^\d.,-]/g, '').replace(/,/g, ''));
+  return Number.isFinite(number) && number > 0 ? number : null;
+}
+
+function integer(value, minimum = 0) {
+  const number = Number.parseInt(value, 10);
+  return Number.isInteger(number) && number >= minimum ? number : null;
+}
+
+async function websiteApiHasApartment(item) {
+  const query = new URLSearchParams({ search: item.apartment_id, pageSize: '50' });
+  const payload = await websiteApiRequest(`/api/Apartments?${query}`);
+  return responseItems(payload).some(apartment =>
+    String(apartment.description || '').includes(item.url) || String(apartment.description || '').includes(`MyHome ID: ${item.apartment_id}`)
+  );
+}
+
+async function uploadApartmentToWebsite(item, agentId) {
+  if (await websiteApiHasApartment(item)) return { existing: true };
+  const form = new FormData();
+  form.set('UploadedByUserId', agentId);
+  form.set('Title', item.title || `Apartment ${item.apartment_id}`);
+  form.set('Description', `${item.description || ''}\n\nSource: ${item.url}\nMyHome ID: ${item.apartment_id}`.trim());
+  form.set('City', 'Tbilisi');
+  form.set('Region', 'Tbilisi');
+  form.set('District', item.district || 'Other');
+  if (item.address) form.set('Address', item.address);
+  if (item.phone) form.set('PhoneNumber', item.phone);
+  const price = positiveNumber(item.price);
+  const size = positiveNumber(item.area_m2);
+  const bedrooms = integer(item.bedrooms);
+  const floor = integer(item.floor);
+  const totalFloors = integer(item.total_floors, 1);
+  if (price) form.set('Price', String(price));
+  if (size) form.set('SizeSquareMeters', String(size));
+  if (bedrooms != null) form.set('Bedrooms', String(bedrooms));
+  if (floor != null) form.set('Floor', String(floor));
+  if (totalFloors != null) form.set('TotalFloors', String(totalFloors));
+  return websiteApiRequest('/api/Apartments', { method: 'POST', body: form });
+}
+
+async function syncPendingWebsiteApartments(data, state) {
+  if (!process.env.WEBSITE_API_EMAIL || !process.env.WEBSITE_API_PASSWORD) return 0;
+  const pending = Object.values(data)
+    .filter(item => !item._baseline && !item._excluded && !item._api_uploaded)
+    .sort((a, b) => String(a.first_seen).localeCompare(String(b.first_seen)));
+  if (!pending.length) return 0;
+  const agents = await getDistributionAgents();
+  let uploaded = 0;
+  for (const item of pending) {
+    const index = Number(state.api_assignment_index || 0) % agents.length;
+    const agent = agents[index];
+    try {
+      await uploadApartmentToWebsite(item, agent.id);
+      item.assigned_agent_id = agent.id;
+      item._api_uploaded = true;
+      item._api_uploaded_at = new Date().toISOString();
+      delete item._api_error;
+      state.api_assignment_index = Number(state.api_assignment_index || 0) + 1;
+      saveData(data);
+      saveState(state);
+      uploaded += 1;
+      console.log(`Uploaded MyHome ID ${item.apartment_id} to agent ${agent.id}.`);
+    } catch (error) {
+      item._api_error = error.message;
+      saveData(data);
+      console.error(`Website API upload failed for MyHome ID ${item.apartment_id}: ${error.message}`);
+    }
+  }
+  return uploaded;
 }
 
 async function extractSsDetail(page, card) {
@@ -674,27 +848,30 @@ async function extractSsDetail(page, card) {
 }
 
 async function scan(context, data, state, options) {
-  const cards = await collectApiCards(options.url, options.pages);
+  const cards = await collectDistrictCards(options.searches, options.pages);
   const byId = new Map(cards.map(card => [card.id, card]));
-  if (!state.initialized || state.engine_version !== 2) {
+  const activeSearchKey = options.searches
+    .map(search => `${search.district}:${searchKey(search.url, options.pages)}`)
+    .sort().join('||');
+  if (!state.initialized || state.engine_version !== 3 || state.myhome_search_key !== activeSearchKey) {
     for (const card of cards) {
       if (!data[card.id]) {
         data[card.id] = {
           apartment_id: card.id,
+          district: card.district,
           url: card.url,
           first_seen: new Date().toISOString(),
           _baseline: true
         };
-      } else {
-        data[card.id]._baseline = true;
       }
     }
     state.initialized = true;
-    state.engine_version = 2;
+    state.engine_version = 3;
+    state.myhome_search_key = activeSearchKey;
     state.initialized_at = new Date().toISOString();
     saveData(data);
     saveState(state);
-    console.log(`Baseline ready with ${byId.size} current IDs. Waiting for newer uploads.`);
+    console.log(`Baseline ready with ${byId.size} current IDs from ${options.searches.length} district(s), ${options.pages} page(s) each. Waiting for newer uploads.`);
     return 0;
   }
 
@@ -712,7 +889,7 @@ async function scan(context, data, state, options) {
   for (const card of repairs) {
     try {
       const detail = await getMyHomeStatement(card.id);
-      const repaired = myHomeApartment(detail, card.id, data[card.id].phone, data[card.id].first_seen);
+      const repaired = myHomeApartment(detail, card.id, data[card.id].phone, data[card.id].first_seen, card.district || data[card.id].district);
       repaired._baseline = false;
       data[card.id] = repaired;
       saveData(data);
@@ -726,12 +903,18 @@ async function scan(context, data, state, options) {
   for (const card of unseen.filter(card => Number(card.api.quantity_of_day) !== 0)) {
     data[card.id] = {
       apartment_id: card.id,
+      district: card.district,
       url: card.url,
       first_seen: new Date().toISOString(),
       _baseline: true
     };
   }
   if (skippedOld) saveData(data);
+  try {
+    await syncPendingWebsiteApartments(data, state);
+  } catch (error) {
+    console.error(`Website API synchronization failed: ${error.message}`);
+  }
   if (!newest.length) return 0;
 
   const detailPage = await context.newPage();
@@ -760,6 +943,11 @@ async function scan(context, data, state, options) {
     }
   } finally {
     await detailPage.close();
+  }
+  try {
+    await syncPendingWebsiteApartments(data, state);
+  } catch (error) {
+    console.error(`Website API synchronization failed: ${error.message}`);
   }
   return saved;
 }
@@ -854,6 +1042,10 @@ async function main() {
   }
   console.log(`Saving results to ${CSV_PATH}`);
   console.log(`Saving SS.ge results to ${SS_CSV_PATH}`);
+  console.log(`Watching MyHome districts: ${options.searches.map(search => search.district).join(', ')} (${options.pages} pages each).`);
+  console.log(process.env.WEBSITE_API_EMAIL && process.env.WEBSITE_API_PASSWORD
+    ? `Website API upload enabled at ${WEBSITE_API_URL}.`
+    : 'Website API upload disabled; set WEBSITE_API_EMAIL and WEBSITE_API_PASSWORD to enable it.');
   console.log('Press Ctrl+C to stop. Current listings are the baseline; only newer uploads are saved.');
 
   writeDashboard();
