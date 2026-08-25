@@ -28,6 +28,11 @@
       </div>
     </header>
 
+    <nav class="management-nav" id="management-nav" data-current-view="{{CURRENT_VIEW}}" hidden aria-label="Management views">
+      <a href="/" data-view="all">All apartments</a>
+      <a href="/?view=accepted" data-view="accepted">✓ Accepted apartments</a>
+    </nav>
+
     <section class="admin-controls" id="admin-controls" aria-labelledby="watcher-controls-title">
       <div class="control-heading">
         <div>
@@ -90,6 +95,9 @@
     if (count.textContent.includes('{{LISTING_COUNT}}')) count.textContent = '0';
     if (viewer.textContent.includes('{{LOGGED_IN_AS}}')) viewer.textContent = 'Template preview';
     if (viewerRole.textContent.includes('{{LOGGED_IN_ROLE}}')) viewerRole.textContent = 'admin';
+    const managementNav = document.getElementById('management-nav');
+    if (managementNav.dataset.currentView.includes('{{CURRENT_VIEW}}')) managementNav.dataset.currentView = 'all';
+    managementNav.querySelectorAll('a').forEach(link => link.classList.toggle('active', link.dataset.view === managementNav.dataset.currentView));
     if (content.textContent.includes('{{DASHBOARD_CONTENT}}')) {
       content.innerHTML = '<div class="empty">Template preview — run the scraper to see live apartments.</div>';
     }
@@ -97,9 +105,10 @@
       document.querySelectorAll('.district-filter').forEach(item => {
         item.classList.toggle('active', item.dataset.district === district);
       });
-      document.querySelectorAll('tbody tr[data-district]').forEach(row => {
+      document.querySelectorAll('tbody tr.apartment-row[data-district]').forEach(row => {
         row.hidden = district !== 'all' && row.dataset.district !== district;
       });
+      document.querySelectorAll('tbody tr.comment-row').forEach(row => { row.hidden = true; });
     };
     document.querySelectorAll('.district-filter').forEach(button => {
       button.addEventListener('click', () => {
@@ -115,6 +124,7 @@
     const showWatcherConfig = config => {
       watcherConfig = config;
       document.getElementById('admin-controls').hidden = !config.canAdmin;
+      managementNav.hidden = !config.canManage;
       const assignment = document.getElementById('assignment-status');
       assignment.textContent = config.assignment?.enabled
         ? `Round-robin assignment enabled · ${config.assignment.pending} pending API uploads`
@@ -222,9 +232,7 @@
           return;
         }
         if (event.target.closest('.accept-button')) {
-          const comment = commentRow.querySelector('.review-comment').value;
-          await saveReview(row, 'accepted', comment);
-          row.classList.add('review-accepting', 'review-accepted');
+          row.classList.add('review-accepting');
           commentRow.hidden = false;
           commentRow.querySelector('.review-comment').focus();
           setTimeout(() => row.classList.remove('review-accepting'), 650);
@@ -234,7 +242,13 @@
           const comment = commentRow.querySelector('.review-comment').value;
           await saveReview(row, 'accepted', comment);
           row.classList.add('review-accepting', 'review-accepted');
-          setTimeout(() => row.classList.remove('review-accepting'), 650);
+          setTimeout(() => {
+            row.classList.remove('review-accepting');
+            if (watcherConfig?.viewer?.role === 'agent') {
+              row.remove();
+              commentRow.remove();
+            }
+          }, 650);
         }
       } catch (error) {
         alert(error.message);

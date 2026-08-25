@@ -97,6 +97,11 @@ h1 {
 .listing-count strong { color: var(--primary); font-size: 24px; }
 .listing-count span { color: var(--muted); font-size: 13px; }
 
+.management-nav { display: flex; gap: 8px; margin-bottom: 14px; }
+.management-nav[hidden] { display: none; }
+.management-nav a { padding: 9px 13px; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--muted); font-size: 13px; font-weight: 700; }
+.management-nav a.active { border-color: #20a464; background: #e5f7ed; color: #087443; }
+
 .admin-controls {
   margin-bottom: 16px;
   padding: 18px;
@@ -251,20 +256,22 @@ h1 {
 }
 
 .results {
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: visible;
   border: 1px solid var(--line);
   border-radius: 16px;
   background: var(--surface);
   box-shadow: var(--shadow);
 }
 
-table { width: 100%; min-width: 1250px; border-collapse: collapse; }
+table { width: 100%; min-width: 0; border-collapse: collapse; table-layout: auto; }
 
 th, td {
   padding: 13px 14px;
   border-bottom: 1px solid var(--line);
   text-align: left;
-  white-space: nowrap;
+  white-space: normal;
+  overflow-wrap: anywhere;
 }
 
 th {
@@ -314,7 +321,9 @@ tbody tr.review-accepted { box-shadow: inset 4px 0 #20a464; }
   background: #f2fbf6;
 }
 
-.comment-row[hidden] { display: none; }
+.review-audit { color: #66758c; font-size: 11px; }
+
+.comment-row[hidden] { display: none !important; }
 .comment-row td { padding: 8px 14px 12px; background: #f8fcfa; }
 .review-comment { resize: vertical; min-height: 64px; padding: 8px; border: 1px solid #b8d8c6; border-radius: 8px; font: inherit; }
 .review-comment:focus { border-color: #20a464; outline: 3px solid rgb(32 164 100 / 12%); }

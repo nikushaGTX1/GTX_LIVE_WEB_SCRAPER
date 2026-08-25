@@ -50,6 +50,15 @@ apartment rather than expanding in the right-side action cell. It stays collapse
 on page load—even when a saved comment exists—and opens only when the green
 checkmark beside the red × is clicked. The server prevents agents from reviewing another
 agent's apartment; admins may review any row.
+District filtering never opens comment rows, and the results table wraps long IDs
+and addresses instead of forcing a horizontal scrollbar.
+
+Admins and managers have an `Accepted apartments` management view at
+`/?view=accepted`. Saving an agent's ✓ comment immediately places the apartment
+in that queue and removes it from the agent's active list. Clicking ✓ only opens
+the editor; the handoff occurs when `Save comment` succeeds. The queue includes accepted apartments across every agent plus the saved
+comment, reviewer email, and review time. Managers are restricted to this accepted
+queue; admins can switch between all and accepted views.
 The Stop button safely ends an active import after its current apartment, retains
 all completed work, leaves remaining IDs ready for the next Start, and pauses the
 dashboard's three-second page refresh until scraping is started again.

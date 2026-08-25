@@ -202,14 +202,19 @@ function readJsonFile(filePath) {
   try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch { return {}; }
 }
 
-function buildDashboard(viewer = null) {
+function buildDashboard(viewer = null, view = 'all') {
   let combined = [
     ...Object.values(readJsonFile(DATA_PATH)).map(item => ({ ...item, source: item.source || 'MyHome' })),
     ...Object.values(readJsonFile(SS_DATA_PATH)).map(item => ({ ...item, source: 'SS.ge' }))
   ].filter(item => !item._baseline && !item._excluded && item._review_status !== 'rejected' && !hasExcludedDescription(item.description))
     .sort((a, b) => String(b.first_seen).localeCompare(String(a.first_seen)));
   if (viewer?.role === 'agent') {
-    combined = combined.filter(item => String(item.assigned_agent_id || '') === viewer.agentId);
+    combined = combined.filter(item =>
+      String(item.assigned_agent_id || '') === viewer.agentId && item._review_status !== 'accepted'
+    );
+  }
+  if (view === 'accepted' || viewer?.role === 'manager') {
+    combined = combined.filter(item => item._review_status === 'accepted');
   }
 
   const rows = combined.map(item => `<tr data-apartment-id="${html(item.apartment_id)}" data-district="${html(item.district || 'Other')}" class="apartment-row ${item._review_status === 'accepted' ? 'review-accepted' : ''}">
@@ -234,6 +239,7 @@ function buildDashboard(viewer = null) {
     <td colspan="12">
       <div class="comment-dropdown">
         <textarea class="review-comment" rows="3" placeholder="Type a comment…">${html(item._review_comment || '')}</textarea>
+        <div class="review-audit">${item._reviewed_by ? `Accepted by ${html(item._reviewed_by)}${item._reviewed_at ? ` · ${html(item._reviewed_at)}` : ''}` : ''}</div>
         <button class="save-comment" type="button">Save comment</button>
       </div>
     </td>
@@ -249,6 +255,7 @@ function buildDashboard(viewer = null) {
     .replace('{{LISTING_COUNT}}', String(combined.length))
     .replace('{{LOGGED_IN_AS}}', html(viewer?.name || viewer?.email || process.env.DASHBOARD_DISPLAY_USER || process.env.WEBSITE_API_EMAIL || 'Local viewer'))
     .replace('{{LOGGED_IN_ROLE}}', html(viewer?.role || 'admin'))
+    .replace('{{CURRENT_VIEW}}', view === 'accepted' || viewer?.role === 'manager' ? 'accepted' : 'all')
     .replace('{{DASHBOARD_CONTENT}}', content);
   return document;
 }
@@ -266,10 +273,10 @@ function dashboardAccounts() {
     return accounts.map(account => ({
       email: clean(account.email).toLowerCase(),
       password: String(account.password || ''),
-      role: String(account.role || 'agent').toLowerCase() === 'admin' ? 'admin' : 'agent',
+      role: ['admin', 'manager'].includes(String(account.role || '').toLowerCase()) ? String(account.role).toLowerCase() : 'agent',
       agentId: String(account.agentId || ''),
       name: clean(account.name || account.email)
-    })).filter(account => account.email && account.password && (account.role === 'admin' || account.agentId));
+    })).filter(account => account.email && account.password && (['admin', 'manager'].includes(account.role) || account.agentId));
   }
   if (process.env.DASHBOARD_USER && process.env.DASHBOARD_PASSWORD) {
     return [{ email: process.env.DASHBOARD_USER.toLowerCase(), password: process.env.DASHBOARD_PASSWORD, role: 'admin', agentId: '', name: process.env.DASHBOARD_DISPLAY_USER || process.env.DASHBOARD_USER }];
@@ -297,7 +304,8 @@ function dashboardIdentity(payload, profile, email, token) {
   const roleValue = user.role || user.crmRole || payload?.role || payload?.data?.role || claims.role || claims['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] || '';
   const roles = Array.isArray(roleValue) ? roleValue : [roleValue];
   const adminEmails = String(process.env.DASHBOARD_ADMIN_EMAILS || '').split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
-  const role = roles.some(value => /admin/i.test(String(value))) || adminEmails.includes(email.toLowerCase()) ? 'admin' : 'agent';
+  const role = roles.some(value => /admin/i.test(String(value))) || adminEmails.includes(email.toLowerCase())
+    ? 'admin' : roles.some(value => /manager/i.test(String(value))) ? 'manager' : 'agent';
   const agentId = String(user.userId || user.user_id || claims.sub || claims.nameid || claims['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier'] || user.id || '');
   return {
     email: clean(user.email || claims.email || email).toLowerCase(),
@@ -376,6 +384,7 @@ function publicWatcherConfig(viewer = { role: 'admin' }) {
     searches: viewer.role === 'admin' ? watcherRuntime.searches : [],
     status: watcherStatus,
     canAdmin: viewer.role === 'admin',
+    canManage: viewer.role === 'admin' || viewer.role === 'manager',
     viewer: { email: viewer.email, name: viewer.name, role: viewer.role, agentId: viewer.agentId },
     assignment: { enabled: apiEnabled, pending: pendingAssignments, lastError: assignmentError }
   };
@@ -448,7 +457,7 @@ async function reviewApartment(request, response, viewer, apartmentId) {
       response.end(JSON.stringify({ error: 'Apartment not found' }));
       return;
     }
-    if (viewer.role !== 'admin' && String(item.assigned_agent_id || '') !== String(viewer.agentId || '')) {
+    if (!['admin', 'manager'].includes(viewer.role) && String(item.assigned_agent_id || '') !== String(viewer.agentId || '')) {
       response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
       response.end(JSON.stringify({ error: 'This apartment is assigned to another agent' }));
       return;
@@ -470,7 +479,8 @@ async function reviewApartment(request, response, viewer, apartmentId) {
 function startWebServer() {
   const port = Number(process.env.PORT || 3000);
   const server = http.createServer(async (request, response) => {
-    const pathname = new URL(request.url, 'http://localhost').pathname;
+    const requestUrl = new URL(request.url, 'http://localhost');
+    const pathname = requestUrl.pathname;
     if (pathname === '/health') {
       response.writeHead(200, { 'content-type': 'application/json' });
       response.end(JSON.stringify({ ok: true }));
@@ -493,8 +503,9 @@ function startWebServer() {
       return;
     }
     if ((pathname === '/' || pathname === '/live-results.html') && request.method === 'GET') {
+      const requestedView = requestUrl.searchParams.get('view') === 'accepted' ? 'accepted' : 'all';
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store, max-age=0' });
-      response.end(buildDashboard(viewer));
+      response.end(buildDashboard(viewer, requestedView));
       return;
     }
     const reviewMatch = pathname.match(/^\/api\/apartments\/(\d+)\/review$/);
@@ -1410,7 +1421,7 @@ async function main() {
   console.log(`Watching MyHome districts: ${watcherRuntime.searches.map(search => search.district).join(', ')} (${watcherRuntime.pages} pages each).`);
   console.log(dashboardApiAuth
     ? `Dashboard authentication uses ${WEBSITE_API_URL}/api/Auth/login.`
-    : `Dashboard accounts: ${accounts.length} (${accounts.filter(account => account.role === 'admin').length} admin, ${accounts.filter(account => account.role === 'agent').length} agent).`);
+    : `Dashboard accounts: ${accounts.length} (${accounts.filter(account => account.role === 'admin').length} admin, ${accounts.filter(account => account.role === 'manager').length} manager, ${accounts.filter(account => account.role === 'agent').length} agent).`);
   console.log(process.env.WEBSITE_API_EMAIL && process.env.WEBSITE_API_PASSWORD
     ? `Website API upload enabled at ${WEBSITE_API_URL}.`
     : 'Website API upload disabled; set WEBSITE_API_EMAIL and WEBSITE_API_PASSWORD to enable it.');
