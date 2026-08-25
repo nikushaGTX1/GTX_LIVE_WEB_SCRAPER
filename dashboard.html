@@ -284,10 +284,11 @@
           return;
         }
         if (event.target.closest('.accept-button')) {
-          if (watcherConfig?.viewer?.role === 'manager') {
+          if (row.querySelector('.management-comment')) {
             const button = event.target.closest('.accept-button');
             const selected = button.classList.toggle('selected');
             button.setAttribute('aria-pressed', String(selected));
+            commentRow.hidden = true;
             row.classList.add('review-accepting');
             setTimeout(() => row.classList.remove('review-accepting'), 650);
             return;
