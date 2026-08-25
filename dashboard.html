@@ -13,7 +13,7 @@
       <div>
         <p class="eyebrow">MyHome &amp; SS.ge watcher</p>
         <h1>Live Apartment Results</h1>
-        <p class="status">Auto-refreshes every 3 seconds</p>
+        <p class="status" id="refresh-status">Auto-refreshes every 3 seconds</p>
       </div>
       <div class="header-meta">
         <div class="viewer" aria-label="Current account">
@@ -111,6 +111,8 @@
       watcherConfig = config;
       toggle.textContent = config.enabled ? 'Stop scraper' : 'Start scraper';
       toggle.classList.toggle('running', config.enabled);
+      document.getElementById('refresh-status').textContent = config.enabled
+        ? 'Auto-refreshes every 3 seconds' : 'Dashboard refresh paused';
       document.getElementById('watcher-pages').value = config.pages;
       document.getElementById('watcher-interval').value = config.interval;
       const searchList = document.getElementById('active-searches');
@@ -168,7 +170,7 @@
         .catch(error => { message.textContent = error.message; });
     });
     setInterval(() => {
-      if (!document.activeElement.closest?.('.admin-controls')) location.reload();
+      if (watcherConfig?.enabled && !document.activeElement.closest?.('.admin-controls')) location.reload();
     }, 3000);
   </script>
 </body>

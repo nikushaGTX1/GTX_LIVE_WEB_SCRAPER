@@ -34,7 +34,8 @@ settings endpoint accepts changes.
 The same panel reports live scanning/import progress, listing counts, the last
 successful completion time, pause state, and the latest scraper error.
 The Stop button safely ends an active import after its current apartment, retains
-all completed work, and leaves remaining IDs ready for the next Start.
+all completed work, leaves remaining IDs ready for the next Start, and pauses the
+dashboard's three-second page refresh until scraping is started again.
 
 ## Start
 
