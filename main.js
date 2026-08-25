@@ -216,7 +216,7 @@ function buildDashboard(viewer = null, view = 'all') {
   const rows = combined.map(item => `<tr data-apartment-id="${html(item.apartment_id)}" data-district="${html(item.district || 'Other')}" class="apartment-row ${item._review_status === 'accepted' ? 'review-accepted' : ''}">
     <td><span class="source ${item.source === 'SS.ge' ? 'ss' : ''}">${html(item.source)}</span></td>
     <td>${html(item.district || 'Other')}</td>
-    <td>${html(item.assigned_agent_id || 'Pending')}</td>
+    <td>${html(item.assigned_agent_name || item.assigned_agent_id || 'Pending')}</td>
     <td><a class="listing-link" href="${html(item.url)}" target="_blank" rel="noopener noreferrer">Open listing ↗</a></td>
     <td class="review-cell">
       <div class="review-buttons">
@@ -494,6 +494,20 @@ function startWebServer() {
         return;
       }
       await updateWatcherConfig(request, response);
+      return;
+    }
+    if (pathname === '/api/apartments/accepted-links' && request.method === 'GET') {
+      if (!['admin', 'manager'].includes(viewer.role)) {
+        response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: 'Management access is required' }));
+        return;
+      }
+      const accepted = [...Object.values(liveMyHomeData || {}), ...Object.values(liveSsData || {})]
+        .filter(item => item._review_status === 'accepted' && item.url)
+        .sort((a, b) => String(a._reviewed_at || '').localeCompare(String(b._reviewed_at || '')));
+      const links = [...new Set(accepted.map(item => item.url))];
+      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      response.end(JSON.stringify({ links }));
       return;
     }
     if ((pathname === '/' || pathname === '/live-results.html') && request.method === 'GET') {
@@ -990,6 +1004,12 @@ function responseItems(payload) {
   return [];
 }
 
+function agentDisplayName(agent) {
+  const person = agent?.user || agent?.profile || agent;
+  return clean(person?.fullName || person?.name || person?.displayName ||
+    [person?.firstName, person?.lastName].filter(Boolean).join(' ') || person?.email || agent?.id);
+}
+
 async function websiteApiRequest(pathname, options = {}, retry = true) {
   const headers = new Headers(options.headers || {});
   if (websiteApiToken) headers.set('authorization', `Bearer ${websiteApiToken}`);
@@ -1029,7 +1049,7 @@ async function getDistributionAgents() {
   if (!websiteApiToken && !await loginWebsiteApi()) return [];
   const payload = await websiteApiRequest('/api/Agents');
   const available = responseItems(payload)
-    .map(agent => ({ ...agent, id: String(agent.userId ?? agent.user_id ?? agent.id ?? '') }))
+    .map(agent => ({ ...agent, id: String(agent.userId ?? agent.user_id ?? agent.user?.id ?? agent.id ?? '') }))
     .filter(agent => agent.id)
     .sort((a, b) => a.id.localeCompare(b.id));
   const configuredIds = String(process.env.WEBSITE_API_AGENT_IDS || '')
@@ -1050,6 +1070,21 @@ async function getDistributionAgents() {
     throw new Error(`Round-robin requires exactly ${distributionCount} agents; resolved ${websiteApiAgents.length}`);
   }
   return websiteApiAgents;
+}
+
+async function hydrateAssignedAgentNames(data) {
+  if (!process.env.WEBSITE_API_EMAIL || !process.env.WEBSITE_API_PASSWORD) return 0;
+  const agents = await getDistributionAgents();
+  const names = new Map(agents.map(agent => [agent.id, agentDisplayName(agent)]));
+  let updated = 0;
+  for (const item of Object.values(data)) {
+    const name = names.get(String(item.assigned_agent_id || ''));
+    if (name && item.assigned_agent_name !== name) {
+      item.assigned_agent_name = name;
+      updated += 1;
+    }
+  }
+  return updated;
 }
 
 function positiveNumber(value) {
@@ -1156,10 +1191,14 @@ async function syncPendingWebsiteApartments(data, state, onlyApartmentId = null)
       const index = Number(state.api_assignment_index || 0) % agents.length;
       agent = agents[index];
       item.assigned_agent_id = agent.id;
+      item.assigned_agent_name = agentDisplayName(agent);
       item._assigned_at = new Date().toISOString();
       state.api_assignment_index = Number(state.api_assignment_index || 0) + 1;
       saveData(data);
       saveState(state);
+    } else if (!item.assigned_agent_name) {
+      item.assigned_agent_name = agentDisplayName(agent);
+      saveData(data);
     }
     try {
       await uploadApartmentToWebsite(item, agent.id);
@@ -1407,6 +1446,12 @@ async function main() {
   const state = loadState();
   const excludedMyHome = markExcludedDescriptions(data);
   const excludedSs = markExcludedDescriptions(ssData);
+  try {
+    const named = await hydrateAssignedAgentNames(data);
+    if (named) console.log(`Resolved display names for ${named} assigned apartment(s).`);
+  } catch (error) {
+    console.error(`Could not resolve existing agent display names: ${error.message}`);
+  }
   saveData(data);
   saveData(ssData, SS_DATA_PATH, SS_CSV_PATH);
   if (excludedMyHome + excludedSs) {

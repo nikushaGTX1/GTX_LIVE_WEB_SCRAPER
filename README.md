@@ -60,6 +60,8 @@ in that queue and removes it from the agent's active list. Clicking ✓ only ope
 the editor; the handoff occurs when `Save comment` succeeds. The queue includes accepted apartments across every agent plus the saved
 comment, reviewer email, and review time. Managers are restricted to this accepted
 queue; admins can switch between all and accepted views.
+The management navigation includes `Copy accepted links`, which copies every
+accepted MyHome/SS.ge URL as plain text with exactly one link per line.
 The Stop button safely ends an active import after its current apartment, retains
 all completed work, leaves remaining IDs ready for the next Start, and pauses the
 dashboard's three-second page refresh until scraping is started again.

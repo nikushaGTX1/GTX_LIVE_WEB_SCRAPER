@@ -31,6 +31,7 @@
     <nav class="management-nav" id="management-nav" data-current-view="{{CURRENT_VIEW}}" hidden aria-label="Management views">
       <a href="/" data-view="all">All apartments</a>
       <a href="/?view=accepted" data-view="accepted">✓ Accepted apartments</a>
+      <button id="copy-accepted-links" type="button">Copy accepted links</button>
     </nav>
 
     <section class="admin-controls" id="admin-controls" aria-labelledby="watcher-controls-title">
@@ -98,6 +99,28 @@
     const managementNav = document.getElementById('management-nav');
     if (managementNav.dataset.currentView.includes('{{CURRENT_VIEW}}')) managementNav.dataset.currentView = 'all';
     managementNav.querySelectorAll('a').forEach(link => link.classList.toggle('active', link.dataset.view === managementNav.dataset.currentView));
+    document.getElementById('copy-accepted-links').addEventListener('click', async event => {
+      const button = event.currentTarget;
+      try {
+        const response = await fetch('/api/apartments/accepted-links');
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Could not load accepted links');
+        const text = result.links.join('\n');
+        if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
+        else {
+          const helper = document.createElement('textarea');
+          helper.value = text;
+          document.body.appendChild(helper);
+          helper.select();
+          document.execCommand('copy');
+          helper.remove();
+        }
+        button.textContent = `Copied ${result.links.length} link(s)`;
+        setTimeout(() => { button.textContent = 'Copy accepted links'; }, 1800);
+      } catch (error) {
+        alert(error.message);
+      }
+    });
     if (content.textContent.includes('{{DASHBOARD_CONTENT}}')) {
       content.innerHTML = '<div class="empty">Template preview — run the scraper to see live apartments.</div>';
     }
