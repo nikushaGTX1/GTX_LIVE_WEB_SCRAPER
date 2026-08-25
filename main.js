@@ -49,7 +49,9 @@ const EXCLUDED_DESCRIPTION_PHRASES = [
   'თავი შეიკავეთ',
   'tavi sheikavet',
   'აგენტებთან არ ვთანამშრომლობ',
-  'agentebtan ar vtanamshromlob'
+  'agentebtan ar vtanamshromlob',
+  'არანაირი აგენტები',
+  'aranairi agentebi'
 ];
 
 const FIELDS = [
