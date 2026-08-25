@@ -109,7 +109,7 @@
 
     const showWatcherConfig = config => {
       watcherConfig = config;
-      toggle.textContent = config.enabled ? 'Pause scraper' : 'Start scraper';
+      toggle.textContent = config.enabled ? 'Stop scraper' : 'Start scraper';
       toggle.classList.toggle('running', config.enabled);
       document.getElementById('watcher-pages').value = config.pages;
       document.getElementById('watcher-interval').value = config.interval;

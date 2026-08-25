@@ -269,7 +269,16 @@ function publicWatcherConfig() {
 async function updateWatcherConfig(request, response) {
   try {
     const body = await readRequestJson(request);
-    if (typeof body.enabled === 'boolean') watcherRuntime.enabled = body.enabled;
+    if (typeof body.enabled === 'boolean') {
+      watcherRuntime.enabled = body.enabled;
+      if (!body.enabled) {
+        watcherStatus.state = 'stopping';
+        watcherStatus.message = 'Stopping after the current apartment…';
+      } else if (watcherStatus.state === 'paused' || watcherStatus.state === 'stopping') {
+        watcherStatus.state = 'starting';
+        watcherStatus.message = 'Scraper will start on the next check…';
+      }
+    }
     if (body.pages != null) {
       const pages = Number(body.pages);
       if (!Number.isInteger(pages) || pages < 1 || pages > 10) throw new Error('Pages must be between 1 and 10');
@@ -908,6 +917,7 @@ async function syncPendingWebsiteApartments(data, state) {
   const agents = await getDistributionAgents();
   let uploaded = 0;
   for (const item of pending) {
+    if (watcherRuntime && !watcherRuntime.enabled) break;
     const index = Number(state.api_assignment_index || 0) % agents.length;
     const agent = agents[index];
     try {
@@ -1023,6 +1033,11 @@ async function scan(context, data, state, options) {
   try {
     const importQueue = toImport.reverse();
     for (let index = 0; index < importQueue.length; index += 1) {
+      if (!options.enabled) {
+        watcherStatus.state = 'paused';
+        watcherStatus.message = `Stopped safely — ${importQueue.length - index} apartment(s) remain to import.`;
+        break;
+      }
       const card = importQueue[index];
       watcherStatus.state = 'importing';
       watcherStatus.message = `Importing apartment ${index + 1} of ${importQueue.length} (ID ${card.id})…`;
@@ -1050,14 +1065,18 @@ async function scan(context, data, state, options) {
   } finally {
     await detailPage.close();
   }
-  try {
-    await syncPendingWebsiteApartments(data, state);
-  } catch (error) {
-    console.error(`Website API synchronization failed: ${error.message}`);
+  if (options.enabled) {
+    try {
+      await syncPendingWebsiteApartments(data, state);
+    } catch (error) {
+      console.error(`Website API synchronization failed: ${error.message}`);
+    }
   }
-  watcherStatus.state = 'idle';
-  watcherStatus.message = `Completed — checked ${byId.size}, imported ${saved}.`;
-  watcherStatus.lastCompletedAt = new Date().toISOString();
+  if (options.enabled) {
+    watcherStatus.state = 'idle';
+    watcherStatus.message = `Completed — checked ${byId.size}, imported ${saved}.`;
+    watcherStatus.lastCompletedAt = new Date().toISOString();
+  }
   return saved;
 }
 

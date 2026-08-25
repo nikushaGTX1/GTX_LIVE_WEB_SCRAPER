@@ -186,6 +186,7 @@ h1 {
 .status-badge.importing { background: #e8f2ff; color: #075bb9; }
 .status-badge.idle { background: #e7f8ef; color: #087443; }
 .status-badge.paused { background: #fff0e4; color: #a84a00; }
+.status-badge.stopping { background: #fff0e4; color: #a84a00; }
 .status-badge.error { background: #ffe9e9; color: #b42318; }
 .status-stats { grid-column: 2; display: flex; flex-wrap: wrap; gap: 12px; color: var(--muted); font-size: 12px; }
 .status-error { grid-column: 1 / -1; margin: 0; color: #b42318; font-size: 12px; }
