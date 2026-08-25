@@ -322,7 +322,9 @@ async function authenticateDashboard(request, response) {
     if (!email || !password) return rejectDashboardLogin(response);
     const cacheKey = crypto.createHash('sha256').update(supplied).digest('hex');
     const account = await authenticateViaWebsiteApi(email, password, cacheKey);
-    return account || rejectDashboardLogin(response);
+    if (account) return account;
+    const fallbackAccount = accounts.find(candidate => candidate.email === email && candidate.password === password);
+    return fallbackAccount || rejectDashboardLogin(response);
   }
   const account = accounts.find(candidate => candidate.email === email && candidate.password === password);
   if (account) return account;

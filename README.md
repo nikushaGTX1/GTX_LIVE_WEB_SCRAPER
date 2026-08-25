@@ -128,6 +128,9 @@ claims for identity/role, and caches only the resolved session identity for ten
 minutes. `DASHBOARD_ADMIN_EMAILS` is a comma-separated fallback for admin accounts
 if the API token does not include an admin role. Other authenticated users are
 treated as agents and filtered by their authenticated user ID.
+For recovery and backward compatibility, API mode also accepts a matching legacy
+`DASHBOARD_USER`/`DASHBOARD_PASSWORD` or `DASHBOARD_ACCOUNTS` entry if Website API
+authentication rejects those credentials.
 
 For separate dashboard-only passwords, set `DASHBOARD_AUTH_MODE=accounts` and use
 `DASHBOARD_ACCOUNTS` instead. Store it as one JSON-line Railway variable:
