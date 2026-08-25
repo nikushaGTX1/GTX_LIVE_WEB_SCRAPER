@@ -3,6 +3,7 @@
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
+const crypto = require('node:crypto');
 const { pathToFileURL } = require('node:url');
 const { chromium } = require('playwright');
 
@@ -73,6 +74,7 @@ const watcherStatus = {
   state: 'starting', message: 'Starting scraper…', found: 0, imported: 0,
   importTotal: 0, lastStartedAt: null, lastCompletedAt: null, lastError: null
 };
+const dashboardApiSessions = new Map();
 
 function clean(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -258,20 +260,73 @@ function dashboardAccounts() {
   return [];
 }
 
-function authenticateDashboard(request, response) {
+function rejectDashboardLogin(response) {
+  response.writeHead(401, { 'WWW-Authenticate': 'Basic realm="Apartment Watcher"' });
+  response.end('Authentication required');
+  return null;
+}
+
+function tokenFromPayload(payload) {
+  return payload?.token || payload?.accessToken || payload?.access_token || payload?.jwt || payload?.data?.token || payload?.data?.accessToken || '';
+}
+
+function decodeJwt(token) {
+  try { return JSON.parse(Buffer.from(token.split('.')[1], 'base64url').toString('utf8')); } catch { return {}; }
+}
+
+function dashboardIdentity(payload, profile, email, token) {
+  const claims = decodeJwt(token);
+  const user = profile?.data || profile?.user || profile || payload?.user || payload?.data?.user || {};
+  const roleValue = user.role || user.crmRole || payload?.role || payload?.data?.role || claims.role || claims['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] || '';
+  const roles = Array.isArray(roleValue) ? roleValue : [roleValue];
+  const adminEmails = String(process.env.DASHBOARD_ADMIN_EMAILS || '').split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
+  const role = roles.some(value => /admin/i.test(String(value))) || adminEmails.includes(email.toLowerCase()) ? 'admin' : 'agent';
+  const agentId = String(user.userId || user.user_id || claims.sub || claims.nameid || claims['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier'] || user.id || '');
+  return {
+    email: clean(user.email || claims.email || email).toLowerCase(),
+    name: clean(user.fullName || user.name || user.displayName || claims.name || email),
+    role,
+    agentId
+  };
+}
+
+async function authenticateViaWebsiteApi(email, password, cacheKey) {
+  const cached = dashboardApiSessions.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.account;
+  const loginResponse = await fetch(`${WEBSITE_API_URL}/api/Auth/login`, {
+    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ email, password })
+  });
+  if (!loginResponse.ok) return null;
+  const payload = await loginResponse.json();
+  const token = tokenFromPayload(payload);
+  if (!token) return null;
+  const profileResponse = await fetch(`${WEBSITE_API_URL}/api/Profile/me`, { headers: { authorization: `Bearer ${token}` } });
+  const profile = profileResponse.ok ? await profileResponse.json().catch(() => ({})) : {};
+  const account = dashboardIdentity(payload, profile, email, token);
+  if (account.role === 'agent' && !account.agentId) return null;
+  dashboardApiSessions.set(cacheKey, { account, expiresAt: Date.now() + 10 * 60 * 1000 });
+  return account;
+}
+
+async function authenticateDashboard(request, response) {
   const accounts = dashboardAccounts();
-  if (!accounts.length && !IS_HOSTED) return { email: 'local', role: 'admin', agentId: '', name: 'Local admin' };
+  const apiMode = String(process.env.DASHBOARD_AUTH_MODE || 'api').toLowerCase() === 'api';
+  if (!apiMode && !accounts.length && !IS_HOSTED) return { email: 'local', role: 'admin', agentId: '', name: 'Local admin' };
   const supplied = request.headers.authorization || '';
   let credentials = '';
   try { if (supplied.startsWith('Basic ')) credentials = Buffer.from(supplied.slice(6), 'base64').toString('utf8'); } catch { /* Reject below. */ }
   const separator = credentials.indexOf(':');
   const email = separator >= 0 ? credentials.slice(0, separator).toLowerCase() : '';
   const password = separator >= 0 ? credentials.slice(separator + 1) : '';
+  if (apiMode) {
+    if (!email || !password) return rejectDashboardLogin(response);
+    const cacheKey = crypto.createHash('sha256').update(supplied).digest('hex');
+    const account = await authenticateViaWebsiteApi(email, password, cacheKey);
+    return account || rejectDashboardLogin(response);
+  }
   const account = accounts.find(candidate => candidate.email === email && candidate.password === password);
   if (account) return account;
-  response.writeHead(401, { 'WWW-Authenticate': 'Basic realm="Apartment Watcher"' });
-  response.end('Authentication required');
-  return null;
+  return rejectDashboardLogin(response);
 }
 
 function readRequestJson(request) {
@@ -361,7 +416,7 @@ function startWebServer() {
       response.end(JSON.stringify({ ok: true }));
       return;
     }
-    const viewer = authenticateDashboard(request, response);
+    const viewer = await authenticateDashboard(request, response);
     if (!viewer) return;
     if (pathname === '/api/watcher/config' && request.method === 'GET') {
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
@@ -892,7 +947,7 @@ async function loginWebsiteApi() {
   });
   if (!response.ok) throw new Error(`Website API login returned HTTP ${response.status}`);
   const payload = await response.json();
-  websiteApiToken = payload.token || payload.accessToken || payload.access_token || payload.jwt || payload.data?.token || payload.data?.accessToken || '';
+  websiteApiToken = tokenFromPayload(payload);
   if (!websiteApiToken) throw new Error('Website API login response did not contain a bearer token');
   return true;
 }
@@ -1207,7 +1262,8 @@ async function main() {
   const options = parseArgs(process.argv.slice(2));
   watcherRuntime = loadWatcherConfig(options);
   const accounts = dashboardAccounts();
-  if (IS_HOSTED && !accounts.length) {
+  const dashboardApiAuth = String(process.env.DASHBOARD_AUTH_MODE || 'api').toLowerCase() === 'api';
+  if (IS_HOSTED && !dashboardApiAuth && !accounts.length) {
     throw new Error('Configure DASHBOARD_ACCOUNTS or DASHBOARD_USER/DASHBOARD_PASSWORD before starting the hosted dashboard');
   }
   const data = loadData();
@@ -1223,7 +1279,9 @@ async function main() {
   console.log(`Saving results to ${CSV_PATH}`);
   console.log(`Saving SS.ge results to ${SS_CSV_PATH}`);
   console.log(`Watching MyHome districts: ${watcherRuntime.searches.map(search => search.district).join(', ')} (${watcherRuntime.pages} pages each).`);
-  console.log(`Dashboard accounts: ${accounts.length} (${accounts.filter(account => account.role === 'admin').length} admin, ${accounts.filter(account => account.role === 'agent').length} agent).`);
+  console.log(dashboardApiAuth
+    ? `Dashboard authentication uses ${WEBSITE_API_URL}/api/Auth/login.`
+    : `Dashboard accounts: ${accounts.length} (${accounts.filter(account => account.role === 'admin').length} admin, ${accounts.filter(account => account.role === 'agent').length} agent).`);
   console.log(process.env.WEBSITE_API_EMAIL && process.env.WEBSITE_API_PASSWORD
     ? `Website API upload enabled at ${WEBSITE_API_URL}.`
     : 'Website API upload disabled; set WEBSITE_API_EMAIL and WEBSITE_API_PASSWORD to enable it.');

@@ -112,8 +112,25 @@ DASHBOARD_USER=your_username
 DASHBOARD_PASSWORD=a_long_random_password
 ```
 
-For multiple individual logins, use `DASHBOARD_ACCOUNTS` instead of the two
-legacy variables. Store it as one JSON-line Railway variable:
+To let users sign in with their existing Website API email/password, use the
+recommended API authentication mode:
+
+```text
+DASHBOARD_AUTH_MODE=api
+WEBSITE_API_URL=https://websiteapi-production-c970.up.railway.app
+DASHBOARD_ADMIN_EMAILS=admin@whitetower.com
+```
+
+The browser's Username field accepts the Website API email, and its Password field
+accepts that user's existing Website API password. The scraper forwards them to
+`/api/Auth/login` over HTTPS, keeps no password, reads `/api/Profile/me` and JWT
+claims for identity/role, and caches only the resolved session identity for ten
+minutes. `DASHBOARD_ADMIN_EMAILS` is a comma-separated fallback for admin accounts
+if the API token does not include an admin role. Other authenticated users are
+treated as agents and filtered by their authenticated user ID.
+
+For separate dashboard-only passwords, set `DASHBOARD_AUTH_MODE=accounts` and use
+`DASHBOARD_ACCOUNTS` instead. Store it as one JSON-line Railway variable:
 
 ```json
 [{"email":"admin@example.com","password":"unique-admin-password","role":"admin","name":"Administrator"},{"email":"agent1@example.com","password":"unique-agent-password","role":"agent","agentId":"agent-user-id-1","name":"Agent 1"},{"email":"agent2@example.com","password":"unique-agent-password","role":"agent","agentId":"agent-user-id-2","name":"Agent 2"}]
