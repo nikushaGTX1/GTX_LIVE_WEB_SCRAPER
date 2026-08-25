@@ -256,11 +256,11 @@
       }).then(() => { document.getElementById('watcher-url').value = ''; })
         .catch(error => { message.textContent = error.message; });
     });
-    const saveReview = async (row, action, comment = '') => {
+    const saveReview = async (row, action, comment = '', extra = {}) => {
       const response = await fetch(`/api/apartments/${row.dataset.apartmentId}/review`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action, comment })
+        body: JSON.stringify({ action, comment, ...extra })
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Could not save apartment review');
@@ -286,7 +286,9 @@
         if (event.target.closest('.accept-button')) {
           if (row.querySelector('.management-comment')) {
             const button = event.target.closest('.accept-button');
-            const selected = button.classList.toggle('selected');
+            const selected = !button.classList.contains('selected');
+            await saveReview(row, 'manager-selection', '', { selected });
+            button.classList.toggle('selected', selected);
             button.setAttribute('aria-pressed', String(selected));
             commentRow.hidden = true;
             row.classList.add('review-accepting');

@@ -229,7 +229,7 @@ function buildDashboard(viewer = null, view = 'all') {
     ${showManagementComments ? `<td class="management-comment"><strong>${html(item._review_comment || 'No comment')}</strong><small>${item._reviewed_by ? `By ${html(item._reviewed_by)}` : ''}${item._reviewed_at ? ` · ${html(item._reviewed_at)}` : ''}</small></td>` : ''}
     <td class="review-cell">
       <div class="review-buttons">
-        <button class="review-button accept-button" type="button" title="Accept and comment" aria-label="Accept apartment">✓</button>
+        <button class="review-button accept-button${showManagementComments && item._manager_selected ? ' selected' : ''}" type="button" title="${showManagementComments ? 'Toggle manager selection' : 'Accept and comment'}" aria-label="${showManagementComments ? 'Toggle manager selection' : 'Accept apartment'}" aria-pressed="${showManagementComments ? String(Boolean(item._manager_selected)) : 'false'}">✓</button>
         <button class="review-button reject-button" type="button" title="Reject apartment" aria-label="Reject apartment">×</button>
       </div>
     </td>
@@ -450,7 +450,7 @@ async function reviewApartment(request, response, viewer, apartmentId) {
   try {
     if (!/^\d+$/.test(apartmentId)) throw new Error('Invalid apartment ID');
     const body = await readRequestJson(request);
-    if (!['accepted', 'rejected'].includes(body.action)) throw new Error('Action must be accepted or rejected');
+    if (!['accepted', 'rejected', 'manager-selection'].includes(body.action)) throw new Error('Invalid review action');
     const comment = clean(body.comment || '').slice(0, 2000);
     const myHomeData = liveMyHomeData || loadData();
     const ssData = liveSsData || loadSsData();
@@ -464,6 +464,21 @@ async function reviewApartment(request, response, viewer, apartmentId) {
     if (!['admin', 'manager'].includes(viewer.role) && String(item.assigned_agent_id || '') !== String(viewer.agentId || '')) {
       response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
       response.end(JSON.stringify({ error: 'This apartment is assigned to another agent' }));
+      return;
+    }
+    if (body.action === 'manager-selection') {
+      if (!['admin', 'manager'].includes(viewer.role)) {
+        response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: 'Management access is required' }));
+        return;
+      }
+      item._manager_selected = body.selected === true;
+      item._manager_selected_by = viewer.email;
+      item._manager_selected_at = new Date().toISOString();
+      if (data === myHomeData) saveData(data);
+      else saveData(data, SS_DATA_PATH, SS_CSV_PATH);
+      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ ok: true, selected: item._manager_selected }));
       return;
     }
     item._review_status = body.action;
