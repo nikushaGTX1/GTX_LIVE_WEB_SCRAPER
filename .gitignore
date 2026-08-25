@@ -4,6 +4,7 @@ node_modules/
 apartments.json
 apartments.csv
 watcher-state.json
+watcher-config.json
 ss-apartments.json
 ss-apartments.csv
 live-results.html

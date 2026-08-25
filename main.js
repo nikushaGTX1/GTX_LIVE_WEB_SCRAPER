@@ -25,6 +25,7 @@ const DASHBOARD_PATH = path.join(DATA_ROOT, 'live-results.html');
 const DASHBOARD_TEMPLATE_PATH = path.join(ROOT, 'dashboard.html');
 const DASHBOARD_CSS_PATH = path.join(ROOT, 'dashboard.css');
 const STATE_PATH = path.join(DATA_ROOT, 'watcher-state.json');
+const WATCHER_CONFIG_PATH = path.join(DATA_ROOT, 'watcher-config.json');
 const PROFILE_PATH = process.env.WATCHER_PROFILE || path.join(DATA_ROOT, '.browser-profile');
 const IS_HOSTED = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID);
 
@@ -66,6 +67,7 @@ const REVEAL_RE = /(ტელეფონ|ნომრის ნახვა|ნ
 let ssAuthToken = '';
 let websiteApiToken = '';
 let websiteApiAgents = [];
+let watcherRuntime = null;
 
 function clean(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -114,7 +116,7 @@ function sleep(ms) {
 }
 
 function parseArgs(argv) {
-  const options = { searches: DISTRICT_SEARCHES, interval: 5, pages: 5, once: false, headless: false };
+  const options = { searches: DISTRICT_SEARCHES, interval: 3, pages: 5, once: false, headless: false };
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
     if (arg === '--once') options.once = true;
@@ -123,14 +125,14 @@ function parseArgs(argv) {
     else if (arg === '--interval') options.interval = Number(argv[++i]);
     else if (arg === '--pages') options.pages = Number(argv[++i]);
     else if (arg === '--help' || arg === '-h') {
-      console.log('Usage: node main.js [--once] [--interval 5] [--pages 5] [--url URL] [--headless]');
+      console.log('Usage: node main.js [--once] [--interval 3] [--pages 5] [--url URL] [--headless]');
       process.exit(0);
     } else {
       throw new Error(`Unknown option: ${arg}`);
     }
   }
-  if (!Number.isFinite(options.interval) || options.interval < 5) {
-    throw new Error('--interval must be at least 5 seconds');
+  if (!Number.isFinite(options.interval) || options.interval < 3) {
+    throw new Error('--interval must be at least 3 seconds');
   }
   if (!Number.isInteger(options.pages) || options.pages < 1 || options.pages > 10) {
     throw new Error('--pages must be a whole number between 1 and 10');
@@ -218,6 +220,7 @@ function writeDashboard() {
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
     .replace('{{LISTING_COUNT}}', String(combined.length))
+    .replace('{{LOGGED_IN_AS}}', html(process.env.DASHBOARD_DISPLAY_USER || process.env.WEBSITE_API_EMAIL || 'Local viewer'))
     .replace('{{DASHBOARD_CONTENT}}', content);
   fs.writeFileSync(DASHBOARD_PATH, document, 'utf8');
 }
@@ -234,9 +237,58 @@ function dashboardAuthorized(request, response) {
   return false;
 }
 
+function readRequestJson(request) {
+  return new Promise((resolve, reject) => {
+    let body = '';
+    request.on('data', chunk => {
+      body += chunk;
+      if (body.length > 100_000) reject(new Error('Request body is too large'));
+    });
+    request.on('end', () => {
+      try { resolve(body ? JSON.parse(body) : {}); } catch { reject(new Error('Invalid JSON body')); }
+    });
+    request.on('error', reject);
+  });
+}
+
+function publicWatcherConfig() {
+  return { enabled: watcherRuntime.enabled, pages: watcherRuntime.pages, interval: watcherRuntime.interval, searches: watcherRuntime.searches };
+}
+
+async function updateWatcherConfig(request, response) {
+  try {
+    const body = await readRequestJson(request);
+    if (typeof body.enabled === 'boolean') watcherRuntime.enabled = body.enabled;
+    if (body.pages != null) {
+      const pages = Number(body.pages);
+      if (!Number.isInteger(pages) || pages < 1 || pages > 10) throw new Error('Pages must be between 1 and 10');
+      watcherRuntime.pages = pages;
+    }
+    if (body.interval != null) {
+      const interval = Number(body.interval);
+      if (!Number.isFinite(interval) || interval < 3 || interval > 3600) throw new Error('Interval must be between 3 and 3600 seconds');
+      watcherRuntime.interval = interval;
+    }
+    if (body.url) {
+      const url = validateMyHomeUrl(body.url);
+      const district = clean(body.district) || districtNameFromUrl(url);
+      const canonical = searchKey(url, watcherRuntime.pages).split('|pages=')[0];
+      const existing = watcherRuntime.searches.find(search => searchKey(search.url, watcherRuntime.pages).split('|pages=')[0] === canonical);
+      if (existing) Object.assign(existing, { district, url });
+      else watcherRuntime.searches.push({ district, url });
+    }
+    saveWatcherConfig(watcherRuntime);
+    response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify(publicWatcherConfig()));
+  } catch (error) {
+    response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+    response.end(JSON.stringify({ error: error.message }));
+  }
+}
+
 function startWebServer() {
   const port = Number(process.env.PORT || 3000);
-  const server = http.createServer((request, response) => {
+  const server = http.createServer(async (request, response) => {
     const pathname = new URL(request.url, 'http://localhost').pathname;
     if (pathname === '/health') {
       response.writeHead(200, { 'content-type': 'application/json' });
@@ -244,6 +296,20 @@ function startWebServer() {
       return;
     }
     if (!dashboardAuthorized(request, response)) return;
+    if (pathname === '/api/watcher/config' && request.method === 'GET') {
+      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      response.end(JSON.stringify(publicWatcherConfig()));
+      return;
+    }
+    if (pathname === '/api/watcher/config' && request.method === 'POST') {
+      if (IS_HOSTED && (!process.env.DASHBOARD_USER || !process.env.DASHBOARD_PASSWORD)) {
+        response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: 'Set DASHBOARD_USER and DASHBOARD_PASSWORD before enabling hosted admin controls' }));
+        return;
+      }
+      await updateWatcherConfig(request, response);
+      return;
+    }
     const files = {
       '/': [DASHBOARD_PATH, 'text/html; charset=utf-8'],
       '/live-results.html': [DASHBOARD_PATH, 'text/html; charset=utf-8'],
@@ -332,6 +398,40 @@ function apiUrl(searchUrl, pageNumber) {
   }
   target.searchParams.set('page', String(pageNumber));
   return target.toString();
+}
+
+function districtNameFromUrl(value) {
+  const slug = new URL(value).pathname.split('/').filter(Boolean).at(-1) || 'custom';
+  const names = { saburtalo: 'Saburtalo', vake: 'Vake', 'didi-dighomi': 'Didi Dighomi', digomi: 'Digomi' };
+  return names[slug] || slug.split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
+}
+
+function validateMyHomeUrl(value) {
+  const url = new URL(value);
+  if (!/(^|\.)myhome\.ge$/i.test(url.hostname)) throw new Error('Only myhome.ge search URLs are allowed');
+  if (!url.pathname.includes('/udzravi-qoneba/')) throw new Error('Enter a MyHome real-estate search URL');
+  return url.toString();
+}
+
+function saveWatcherConfig(config) {
+  fs.writeFileSync(WATCHER_CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8');
+}
+
+function loadWatcherConfig(options) {
+  let saved = null;
+  try { saved = JSON.parse(fs.readFileSync(WATCHER_CONFIG_PATH, 'utf8')); } catch { /* Use CLI defaults. */ }
+  const config = {
+    enabled: saved?.enabled !== false,
+    pages: Number.isInteger(saved?.pages) && saved.pages >= 1 && saved.pages <= 10 ? saved.pages : options.pages,
+    interval: Number.isFinite(saved?.interval) && saved.interval >= 3 ? saved.interval : options.interval,
+    searches: Array.isArray(saved?.searches) && saved.searches.length ? saved.searches : options.searches
+  };
+  config.searches = config.searches.map(search => ({
+    district: clean(search.district) || districtNameFromUrl(search.url),
+    url: validateMyHomeUrl(search.url)
+  }));
+  saveWatcherConfig(config);
+  return config;
 }
 
 function searchKey(searchUrl, pageCount) {
@@ -1022,6 +1122,7 @@ async function scanSs(context, data, state) {
 
 async function main() {
   const options = parseArgs(process.argv.slice(2));
+  watcherRuntime = loadWatcherConfig(options);
   const data = loadData();
   const ssData = loadSsData();
   const state = loadState();
@@ -1034,7 +1135,7 @@ async function main() {
   }
   console.log(`Saving results to ${CSV_PATH}`);
   console.log(`Saving SS.ge results to ${SS_CSV_PATH}`);
-  console.log(`Watching MyHome districts: ${options.searches.map(search => search.district).join(', ')} (${options.pages} pages each).`);
+  console.log(`Watching MyHome districts: ${watcherRuntime.searches.map(search => search.district).join(', ')} (${watcherRuntime.pages} pages each).`);
   console.log(process.env.WEBSITE_API_EMAIL && process.env.WEBSITE_API_PASSWORD
     ? `Website API upload enabled at ${WEBSITE_API_URL}.`
     : 'Website API upload disabled; set WEBSITE_API_EMAIL and WEBSITE_API_PASSWORD to enable it.');
@@ -1053,14 +1154,15 @@ async function main() {
     while (true) {
       console.log(`\n[${new Date().toLocaleString()}] Checking MyHome...`);
       try {
-        await scan(context, data, state, options);
+        if (watcherRuntime.enabled) await scan(context, data, state, watcherRuntime);
+        else console.log('MyHome watcher is paused by the admin.');
         await scanSs(context, ssData, state);
       } catch (error) {
         console.error(`Scan failed: ${error.message}`);
       }
       if (options.once) break;
-      console.log(`Next check in ${options.interval} seconds.`);
-      await sleep(options.interval * 1000);
+      console.log(`Next check in ${watcherRuntime.interval} seconds.`);
+      await sleep(watcherRuntime.interval * 1000);
     }
   } finally {
     saveData(data);

@@ -26,6 +26,12 @@ Refreshing the dashboard or restarting the watcher does not remove saved
 apartments. Existing records are preserved even if the watcher state file must be
 rebuilt or the district configuration changes.
 
+Authenticated dashboard admins can paste another filtered MyHome URL, select
+1–10 pages, set a polling interval (minimum 3 seconds), and pause or start MyHome
+scraping. These controls are stored in `watcher-config.json` and survive restarts.
+On Railway, `DASHBOARD_USER` and `DASHBOARD_PASSWORD` are required before the
+settings endpoint accepts changes.
+
 ## Start
 
 Double-click **run.bat**. On its first run it installs Chromium, so setup can take
@@ -68,6 +74,7 @@ WEBSITE_API_URL=https://websiteapi-production-c970.up.railway.app
 WEBSITE_API_EMAIL=agent@example.com
 WEBSITE_API_PASSWORD=your_password
 WEBSITE_API_AGENT_IDS=agent-id-1,agent-id-2,agent-id-3,agent-id-4,agent-id-5,agent-id-6,agent-id-7,agent-id-8
+DASHBOARD_DISPLAY_USER=Administrator
 ```
 
 The account must be able to log in and access both `/api/Agents` and
@@ -78,6 +85,8 @@ order. Any positive number of agents is supported. If omitted, every agent retur
 by `/api/Agents` is used. The scraper dashboard shows all apartments and the agent
 ID assigned to each one; API-wide admin visibility is governed by the admin account's
 permissions in the Website API.
+The dashboard displays `DASHBOARD_DISPLAY_USER`, or the API login email when no
+display name is configured, so viewers can see which account the scraper uses.
 
 Do not poll aggressively. MyHome can change its layout or access controls; the
 scraper reports individual listings it cannot parse and continues watching.
