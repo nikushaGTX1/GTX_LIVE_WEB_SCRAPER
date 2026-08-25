@@ -54,6 +54,10 @@
         </label>
         <button class="save-button" type="submit">Add search &amp; save</button>
       </form>
+      <div class="preset-section">
+        <span>Quick district toggles</span>
+        <div id="search-presets" class="search-presets"></div>
+      </div>
       <p id="watcher-message" class="control-message" aria-live="polite"></p>
       <div class="scraper-status" aria-live="polite">
         <span id="scraper-state" class="status-badge">Starting</span>
@@ -180,6 +184,29 @@
         });
         badge.append(label, remove);
         return badge;
+      }));
+      const canonicalUrl = value => {
+        const url = new URL(value);
+        url.hash = '';
+        url.searchParams.delete('page');
+        url.searchParams.delete('CardView');
+        url.searchParams.sort();
+        return url.toString();
+      };
+      const activeUrls = new Set(config.searches.map(search => canonicalUrl(search.url)));
+      const presetList = document.getElementById('search-presets');
+      presetList.replaceChildren(...config.presets.map(preset => {
+        const active = activeUrls.has(canonicalUrl(preset.url));
+        const button = document.createElement('button');
+        button.type = 'button';
+        button.className = `preset-toggle${active ? ' active' : ''}`;
+        button.textContent = `${active ? '✓ ' : '+ '}${preset.district}`;
+        button.setAttribute('aria-pressed', String(active));
+        button.addEventListener('click', () => {
+          const payload = active ? { removeUrl: preset.url } : { url: preset.url, enabled: true };
+          saveWatcherConfig(payload).catch(error => { message.textContent = error.message; });
+        });
+        return button;
       }));
       showWatcherStatus(config.status);
     };

@@ -8,6 +8,12 @@ const { pathToFileURL } = require('node:url');
 const { chromium } = require('playwright');
 
 const DISTRICT_SEARCHES = [];
+const SEARCH_PRESETS = [
+  { district: 'Saburtalo', url: 'https://www.myhome.ge/udzravi-qoneba/qiravdeba/bina/tbilisi/saburtalo/?deal_types=2&real_estate_types=1&cities=1&urbans=47&districts=4&currency_id=1&CardView=1&page=1&owner_type=physical' },
+  { district: 'Vake', url: 'https://www.myhome.ge/udzravi-qoneba/qiravdeba/bina/tbilisi/vake/?deal_types=2&real_estate_types=1&cities=1&urbans=38&districts=4&currency_id=1&CardView=1&page=1&owner_type=physical' },
+  { district: 'Didi Dighomi', url: 'https://www.myhome.ge/udzravi-qoneba/qiravdeba/bina/tbilisi/didi-dighomi/?deal_types=2&real_estate_types=1&cities=1&urbans=29&districts=4&currency_id=1&CardView=1&page=1&owner_type=physical' },
+  { district: 'Digomi', url: 'https://www.myhome.ge/udzravi-qoneba/qiravdeba/bina/tbilisi/digomi/?deal_types=2&real_estate_types=1&cities=1&urbans=24&districts=4&currency_id=1&CardView=1&page=1&owner_type=physical' }
+];
 const WEBSITE_API_URL = process.env.WEBSITE_API_URL || 'https://websiteapi-production-c970.up.railway.app';
 const SS_URL = 'https://home.ss.ge/ka/udzravi-qoneba/l/bina/qiravdeba?cityIdList=95&subdistrictIds=2%2C3%2C4%2C5%2C26%2C27%2C44%2C45%2C46%2C47%2C48%2C49%2C50&currencyId=1&advancedSearch=%7B%22individualEntityOnly%22%3Atrue%7D';
 const ROOT = __dirname;
@@ -375,6 +381,7 @@ function publicWatcherConfig(viewer = { role: 'admin' }) {
     pages: watcherRuntime.pages,
     interval: watcherRuntime.interval,
     searches: viewer.role === 'admin' ? watcherRuntime.searches : [],
+    presets: viewer.role === 'admin' ? SEARCH_PRESETS : [],
     status: watcherStatus,
     canAdmin: viewer.role === 'admin',
     canManage: viewer.role === 'admin' || viewer.role === 'manager',
@@ -420,10 +427,10 @@ async function updateWatcherConfig(request, response) {
       watcherRuntime.searches = watcherRuntime.searches.filter(search =>
         searchKey(search.url, watcherRuntime.pages).split('|pages=')[0] !== canonical
       );
-      watcherRuntime.enabled = false;
-      watcherStatus.state = watcherRuntime.searches.length ? 'stopping' : 'paused';
+      if (!watcherRuntime.searches.length) watcherRuntime.enabled = false;
+      watcherStatus.state = watcherRuntime.searches.length && watcherRuntime.enabled ? 'starting' : 'paused';
       watcherStatus.message = watcherRuntime.searches.length
-        ? 'Search removed. Stopping the active queue safely…'
+        ? 'Search removed. Refreshing the active district queue…'
         : 'No MyHome search links configured.';
     }
     if (watcherRuntime.enabled && !watcherRuntime.searches.length) {
@@ -1317,6 +1324,14 @@ async function scan(context, data, state, options) {
       if (!options.enabled) {
         watcherStatus.state = 'paused';
         watcherStatus.message = `Stopped safely — ${importQueue.length - index} apartment(s) remain to import.`;
+        break;
+      }
+      const currentSearchKey = options.searches
+        .map(search => `${search.district}:${searchKey(search.url, options.pages)}`)
+        .sort().join('||');
+      if (currentSearchKey !== activeSearchKey) {
+        watcherStatus.state = 'starting';
+        watcherStatus.message = 'District selection changed. Refreshing the apartment queue…';
         break;
       }
       const card = importQueue[index];

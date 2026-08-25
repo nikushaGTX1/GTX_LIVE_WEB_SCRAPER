@@ -168,6 +168,12 @@ h1 {
 .toggle-button.running { background: #fff0e4; color: #a84a00; }
 .save-button { background: var(--primary); color: #fff; }
 .control-message { min-height: 18px; margin: 10px 0 0; color: var(--muted); font-size: 12px; }
+.preset-section { display: flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-top: 12px; }
+.preset-section > span { color: var(--muted); font-size: 12px; font-weight: 700; }
+.search-presets { display: flex; flex-wrap: wrap; gap: 7px; }
+.preset-toggle { padding: 7px 11px; border: 1px solid var(--line); border-radius: 999px; background: #fff; color: var(--muted); cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
+.preset-toggle:hover { border-color: var(--primary); color: var(--primary); }
+.preset-toggle.active { border-color: #20a464; background: #e5f7ed; color: #087443; }
 .scraper-status {
   display: grid;
   grid-template-columns: auto 1fr;

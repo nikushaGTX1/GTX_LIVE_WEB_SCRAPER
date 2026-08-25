@@ -103,6 +103,10 @@ watcher starts paused with an empty search list while preserving apartment
 history. An admin must paste and save each desired filtered MyHome URL. SS.ge is
 also disabled by default; set `ENABLE_SS_SCRAPER=true` only when it is explicitly
 needed.
+Admin controls include opt-in preset toggles for Saburtalo, Vake, Didi Dighomi,
+and Digomi. A preset is added only when clicked, is highlighted while active, and
+can be removed by clicking it again. Preset state uses the same persistent search
+configuration as manually pasted URLs.
 
 ## Website API integration
 
