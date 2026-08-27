@@ -1282,11 +1282,13 @@ async function hydrateListingUploadHistory() {
         if (!Number.isInteger(apartmentId) || apartmentId < 1) {
           const apartment = await websiteApiHasApartment(item);
           apartmentId = Number(apartment?.id);
-          if (!Number.isInteger(apartmentId) || apartmentId < 1) continue;
-          item._website_api_apartment_id = apartmentId;
-          changed = true;
+          if (Number.isInteger(apartmentId) && apartmentId > 0) { item._website_api_apartment_id = apartmentId; changed = true; }
         }
-        const uploads = responseItems(await websiteApiRequest(`/api/Apartments/${apartmentId}/uploads`));
+        const sourcePlatform = item.source === 'SS.ge' ? 'ssge' : 'myhome';
+        const uploadPath = Number.isInteger(apartmentId) && apartmentId > 0
+          ? `/api/Apartments/${apartmentId}/uploads`
+          : `/api/ListingUploads?sourcePlatform=${sourcePlatform}&sourceListingId=${encodeURIComponent(item.apartment_id)}`;
+        const uploads = responseItems(await websiteApiRequest(uploadPath));
         if (JSON.stringify(item._listing_uploads || []) !== JSON.stringify(uploads)) {
           item._listing_uploads = uploads;
           changed = true;
