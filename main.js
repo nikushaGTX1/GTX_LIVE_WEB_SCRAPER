@@ -1179,7 +1179,7 @@ function responseItems(payload) {
 function listingUploadItems(payload) {
   const items = responseItems(payload);
   const uploads=items.length?items:(payload&&typeof payload==='object'&&payload.publishedListingId?[payload]:[]);
-  return uploads.filter(upload=>upload.platform!=='myhome'||/^\d{5,8}$/.test(String(upload.publishedListingId||'')));
+  return uploads.filter(upload=>upload.platform!=='myhome'||Number(upload.publishedListingId)>=20_000_000);
 }
 
 async function forEachConcurrent(items,limit,worker){
