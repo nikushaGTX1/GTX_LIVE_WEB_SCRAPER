@@ -1180,6 +1180,14 @@ function listingUploadItems(payload) {
   return payload && typeof payload === 'object' && payload.publishedListingId ? [payload] : [];
 }
 
+async function forEachConcurrent(items,limit,worker){
+  let cursor=0;
+  const runners=Array.from({length:Math.min(limit,items.length)},async()=>{
+    while(cursor<items.length){const index=cursor++;await worker(items[index],index);}
+  });
+  await Promise.all(runners);
+}
+
 function agentDisplayName(agent) {
   const person = agent?.user || agent?.profile || agent;
   return clean(person?.fullName || person?.name || person?.displayName ||
@@ -1284,14 +1292,9 @@ async function hydrateListingUploadHistory() {
   for (const source of sources) {
     let changed = false;
     const items = Object.values(source.data).filter(item => !item._baseline && !item._excluded && item._review_status !== 'rejected');
-    for (const item of items) {
+    await forEachConcurrent(items,12,async item=>{
       try {
-        let apartmentId = Number(item._website_api_apartment_id);
-        if (!Number.isInteger(apartmentId) || apartmentId < 1) {
-          const apartment = await websiteApiHasApartment(item);
-          apartmentId = Number(apartment?.id);
-          if (Number.isInteger(apartmentId) && apartmentId > 0) { item._website_api_apartment_id = apartmentId; changed = true; }
-        }
+        const apartmentId = Number(item._website_api_apartment_id);
         const sourcePlatform = item.source === 'SS.ge' ? 'ssge' : 'myhome';
         const uploadPaths = [`/api/ListingUploads?sourcePlatform=${sourcePlatform}&sourceListingId=${encodeURIComponent(item.apartment_id)}`];
         if(Number.isInteger(apartmentId)&&apartmentId>0)uploadPaths.push(`/api/Apartments/${apartmentId}/uploads`);
@@ -1310,7 +1313,7 @@ async function hydrateListingUploadHistory() {
       } catch (error) {
         item._listing_uploads_error = error.message;
       }
-    }
+    });
     if (changed) source.save(source.data);
   }
   dashboardUploadAgents.sort((left,right)=>left.name.localeCompare(right.name));
