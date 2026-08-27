@@ -296,6 +296,12 @@ th {
 tbody tr:last-child td { border-bottom: 0; }
 tbody tr:hover { background: #f7fbff; }
 tbody tr.review-accepted { box-shadow: inset 4px 0 #20a464; }
+.agent-upload-heading { min-width: 130px; text-align: center; }
+.upload-ids { min-width: 130px; text-align: center; vertical-align: middle; }
+.upload-ids a,.upload-ids span { display: block; margin: 3px 0; white-space: nowrap; font-size: 12px; font-weight: 700; }
+.upload-ids a { color: var(--primary); text-decoration: none; }
+.upload-ids a:hover { text-decoration: underline; }
+.empty-upload { color: var(--muted); }
 
 .review-cell { min-width: 150px; white-space: normal; }
 .review-buttons { display: flex; gap: 7px; }

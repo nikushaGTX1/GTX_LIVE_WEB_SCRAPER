@@ -74,6 +74,8 @@ const REVEAL_RE = /(ტელეფონ|ნომრის ნახვა|ნ
 let ssAuthToken = '';
 let websiteApiToken = '';
 let websiteApiAgents = [];
+let dashboardUploadAgents = [];
+let dashboardUploadsRefreshedAt = 0;
 let watcherRuntime = null;
 let liveMyHomeData = null;
 let liveSsData = null;
@@ -269,23 +271,32 @@ function buildDashboard(viewer = null, view = 'all') {
   ].filter(item => !item._baseline && !item._excluded && item._review_status !== 'rejected' && !hasExcludedDescription(item.description))
     .sort((a, b) => String(b.first_seen).localeCompare(String(a.first_seen)));
   if (viewer?.role === 'agent') {
-    combined = combined.filter(item => {
-      if (String(item.assigned_agent_id || '') !== viewer.agentId) return false;
-      return view === 'accepted' ? item._review_status === 'accepted' : item._review_status !== 'accepted';
-    });
+    combined = combined.filter(item => view === 'accepted' ? item._review_status === 'accepted' : item._review_status !== 'accepted');
   }
   if ((view === 'accepted' && viewer?.role !== 'agent') || viewer?.role === 'manager') {
     combined = combined.filter(item => item._review_status === 'accepted');
   }
   const showManagementComments = view === 'accepted' || viewer?.role === 'manager';
   const canManageSelection = ['admin', 'manager'].includes(viewer?.role) && showManagementComments;
+  const uploadAgents = dashboardUploadAgents;
+  const uploadCell = (item, agent) => {
+    const uploads = (item._listing_uploads || []).filter(upload => String(upload.agentUserId || '') === String(agent.id));
+    if (!uploads.length) return '<td class="upload-ids empty-upload">—</td>';
+    return `<td class="upload-ids">${uploads.map(upload => {
+      const label = upload.platform === 'myhome' ? 'MH' : 'SS';
+      const id = html(upload.publishedListingId);
+      return upload.publishedUrl
+        ? `<a href="${html(upload.publishedUrl)}" target="_blank" rel="noopener noreferrer">${label}: ${id} ↗</a>`
+        : `<span>${label}: ${id}</span>`;
+    }).join('')}</td>`;
+  };
 
   const rows = combined.map(item => `<tr data-apartment-id="${html(item.apartment_id)}" data-district="${html(item.district || 'Other')}" class="apartment-row ${item._review_status === 'accepted' ? 'review-accepted' : ''}">
     <td><span class="source ${item.source === 'SS.ge' ? 'ss' : ''}">${html(item.source)}</span></td>
     <td>${html(item.district || 'Other')}</td>
-    <td>${html(item.assigned_agent_name || item.assigned_agent_id || 'Pending')}</td>
     <td><a class="listing-link" href="${html(item.url)}" target="_blank" rel="noopener noreferrer">Open listing ↗</a></td>
     ${showManagementComments ? `<td class="management-comment"><strong>${html(item._review_comment || 'No comment')}</strong><small>${item._reviewed_by ? `By ${html(item._reviewed_by)}` : ''}${item._reviewed_at ? ` · ${html(item._reviewed_at)}` : ''}</small></td>` : ''}
+    ${uploadAgents.map(agent => uploadCell(item, agent)).join('')}
     <td class="review-cell">
       <div class="review-buttons">
         <button class="review-button accept-button${canManageSelection && item._manager_selected ? ' selected' : ''}" type="button" title="${canManageSelection ? 'Toggle manager selection' : 'Accept and comment'}" aria-label="${canManageSelection ? 'Toggle manager selection' : 'Accept apartment'}" aria-pressed="${canManageSelection ? String(Boolean(item._manager_selected)) : 'false'}">✓</button>
@@ -294,7 +305,7 @@ function buildDashboard(viewer = null, view = 'all') {
     </td>
   </tr>
   <tr class="comment-row" data-apartment-id="${html(item.apartment_id)}" data-comment-for="${html(item.apartment_id)}" data-district="${html(item.district || 'Other')}" hidden>
-    <td colspan="${showManagementComments ? 6 : 5}">
+    <td colspan="${(showManagementComments ? 5 : 4) + uploadAgents.length}">
       <div class="comment-dropdown">
         <textarea class="review-comment" rows="3" placeholder="Type a comment…">${html(item._review_comment || '')}</textarea>
         <div class="review-audit">${item._reviewed_by ? `Accepted by ${html(item._reviewed_by)}${item._reviewed_at ? ` · ${html(item._reviewed_at)}` : ''}` : ''}</div>
@@ -307,7 +318,7 @@ function buildDashboard(viewer = null, view = 'all') {
     throw new Error(`Dashboard template is missing: ${DASHBOARD_TEMPLATE_PATH}`);
   }
   const content = view === 'owners' ? buildOwnersContent(viewer) : combined.length
-    ? `<table><thead><tr><th>Source</th><th>District</th><th>Assigned agent</th><th>Link</th>${showManagementComments ? '<th>Comment</th>' : ''}<th>Review</th></tr></thead><tbody>${rows}</tbody></table>`
+    ? `<table><thead><tr><th>Source</th><th>District</th><th>Link</th>${showManagementComments ? '<th>Comment</th>' : ''}${uploadAgents.map(agent => `<th class="agent-upload-heading">${html(agent.name)}</th>`).join('')}<th>Review</th></tr></thead><tbody>${rows}</tbody></table>`
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
     .replace('{{LISTING_COUNT}}', String(view === 'owners' ? ownersData(viewer).rows.length : combined.length))
@@ -521,11 +532,6 @@ async function reviewApartment(request, response, viewer, apartmentId) {
       response.end(JSON.stringify({ error: 'Apartment not found' }));
       return;
     }
-    if (!['admin', 'manager'].includes(viewer.role) && String(item.assigned_agent_id || '') !== String(viewer.agentId || '')) {
-      response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
-      response.end(JSON.stringify({ error: 'This apartment is assigned to another agent' }));
-      return;
-    }
     if (body.action === 'manager-selection') {
       if (!['admin', 'manager'].includes(viewer.role)) {
         response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
@@ -590,7 +596,13 @@ function startWebServer() {
       const accepted = [...Object.values(liveMyHomeData || {}), ...Object.values(liveSsData || {})]
         .filter(item => item._review_status === 'accepted' && item.url)
         .sort((a, b) => String(a._reviewed_at || '').localeCompare(String(b._reviewed_at || '')));
-      const entries = accepted.map(item => ({ link: item.url, comment: item._review_comment || '' }));
+      const entries = accepted.map(item => {
+        const apartmentId = Number(item._website_api_apartment_id);
+        const link = Number.isInteger(apartmentId) && apartmentId > 0
+          ? `${String(item.url).split('#')[0]}#nikas-api-apartment-id=${apartmentId}`
+          : item.url;
+        return { link, comment: item._review_comment || '', apiApartmentId: Number.isInteger(apartmentId) ? apartmentId : null };
+      });
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       response.end(JSON.stringify({ entries }));
       return;
@@ -664,6 +676,9 @@ function startWebServer() {
     if ((pathname === '/' || pathname === '/live-results.html') && request.method === 'GET') {
       const requested = requestUrl.searchParams.get('view');
       const requestedView = requested === 'owners' ? 'owners' : (requested === 'accepted' ? 'accepted' : 'all');
+      if (requestedView !== 'owners') await hydrateListingUploadHistory().catch(error => {
+        console.error(`Could not refresh listing upload history: ${error.message}`);
+      });
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store, max-age=0' });
       response.end(buildDashboard(viewer, requestedView));
       return;
@@ -1239,6 +1254,51 @@ async function hydrateAssignedAgentNames(data) {
   return updated;
 }
 
+async function hydrateListingUploadHistory() {
+  if (!process.env.WEBSITE_API_EMAIL || !process.env.WEBSITE_API_PASSWORD) return;
+  if (Date.now() - dashboardUploadsRefreshedAt < 30_000) return;
+  dashboardUploadsRefreshedAt = Date.now();
+  if (!websiteApiToken && !await loginWebsiteApi()) return;
+
+  const agentPayload = await websiteApiRequest('/api/Agents');
+  dashboardUploadAgents = responseItems(agentPayload)
+    .map(agent => ({
+      id: String(agent.userId ?? agent.user_id ?? agent.user?.id ?? agent.id ?? ''),
+      name: agentDisplayName(agent)
+    }))
+    .filter(agent => agent.id)
+    .sort((left, right) => left.name.localeCompare(right.name));
+
+  const sources = [
+    { data: liveMyHomeData || loadData(), save: data => saveData(data) },
+    { data: liveSsData || loadSsData(), save: data => saveData(data, SS_DATA_PATH, SS_CSV_PATH) }
+  ];
+  for (const source of sources) {
+    let changed = false;
+    const items = Object.values(source.data).filter(item => !item._baseline && !item._excluded && item._review_status !== 'rejected');
+    for (const item of items) {
+      try {
+        let apartmentId = Number(item._website_api_apartment_id);
+        if (!Number.isInteger(apartmentId) || apartmentId < 1) {
+          const apartment = await websiteApiHasApartment(item);
+          apartmentId = Number(apartment?.id);
+          if (!Number.isInteger(apartmentId) || apartmentId < 1) continue;
+          item._website_api_apartment_id = apartmentId;
+          changed = true;
+        }
+        const uploads = responseItems(await websiteApiRequest(`/api/Apartments/${apartmentId}/uploads`));
+        if (JSON.stringify(item._listing_uploads || []) !== JSON.stringify(uploads)) {
+          item._listing_uploads = uploads;
+          changed = true;
+        }
+      } catch (error) {
+        item._listing_uploads_error = error.message;
+      }
+    }
+    if (changed) source.save(source.data);
+  }
+}
+
 function positiveNumber(value) {
   const number = Number(String(value ?? '').replace(/[^\d.,-]/g, '').replace(/,/g, ''));
   return Number.isFinite(number) && number > 0 ? number : null;
@@ -1252,9 +1312,9 @@ function integer(value, minimum = 0) {
 async function websiteApiHasApartment(item) {
   const query = new URLSearchParams({ search: item.apartment_id, pageSize: '50' });
   const payload = await websiteApiRequest(`/api/Apartments?${query}`);
-  return responseItems(payload).some(apartment =>
+  return responseItems(payload).find(apartment =>
     String(apartment.description || '').includes(item.url) || String(apartment.description || '').includes(`MyHome ID: ${item.apartment_id}`)
-  );
+  ) || null;
 }
 
 function canonicalStreet(payload) {
@@ -1295,11 +1355,11 @@ async function resolveWebsiteStreet(address) {
   throw new Error(`Canonical StreetId was not found for address: ${original}`);
 }
 
-async function uploadApartmentToWebsite(item, agentId) {
-  if (await websiteApiHasApartment(item)) return { existing: true };
+async function uploadApartmentToWebsite(item) {
+  const existing = await websiteApiHasApartment(item);
+  if (existing) return { existing: true, apartment: existing };
   const street = await resolveWebsiteStreet(item.address);
   const form = new FormData();
-  form.set('UploadedByUserId', agentId);
   form.set('Title', item.title || `Apartment ${item.apartment_id}`);
   form.set('Description', `${item.description || ''}\n\nSource: ${item.url}\nMyHome ID: ${item.apartment_id}`.trim());
   form.set('City', 'Tbilisi');
@@ -1329,38 +1389,23 @@ async function syncPendingWebsiteApartments(data, state, onlyApartmentId = null)
       (onlyApartmentId == null || String(item.apartment_id) === String(onlyApartmentId)))
     .sort((a, b) => String(a.first_seen).localeCompare(String(b.first_seen)));
   if (!pending.length) return 0;
-  const agents = await getDistributionAgents();
   let uploaded = 0;
   for (let pendingIndex = 0; pendingIndex < pending.length; pendingIndex += 1) {
     const item = pending[pendingIndex];
     if (watcherRuntime && !watcherRuntime.enabled) break;
-    watcherStatus.state = 'assigning';
-    watcherStatus.message = `Assigning apartment ${pendingIndex + 1} of ${pending.length} to agents…`;
-    let agent = item.assigned_agent_id
-      ? agents.find(candidate => candidate.id === String(item.assigned_agent_id))
-      : null;
-    if (!agent) {
-      const index = Number(state.api_assignment_index || 0) % agents.length;
-      agent = agents[index];
-      item.assigned_agent_id = agent.id;
-      item.assigned_agent_name = agentDisplayName(agent);
-      item._assigned_at = new Date().toISOString();
-      state.api_assignment_index = Number(state.api_assignment_index || 0) + 1;
-      saveData(data);
-      saveState(state);
-    } else if (!item.assigned_agent_name) {
-      item.assigned_agent_name = agentDisplayName(agent);
-      saveData(data);
-    }
+    watcherStatus.state = 'uploading';
+    watcherStatus.message = `Uploading apartment ${pendingIndex + 1} of ${pending.length}…`;
     try {
-      await uploadApartmentToWebsite(item, agent.id);
+      const uploadedResult = await uploadApartmentToWebsite(item);
+      const websiteApartment = uploadedResult?.apartment || uploadedResult?.data?.apartment;
+      if (websiteApartment?.id != null) item._website_api_apartment_id = Number(websiteApartment.id);
       item._api_uploaded = true;
       item._api_uploaded_at = new Date().toISOString();
       delete item._api_error;
       saveData(data);
       saveState(state);
       uploaded += 1;
-      console.log(`Uploaded MyHome ID ${item.apartment_id} to agent ${agent.id}.`);
+      console.log(`Uploaded MyHome ID ${item.apartment_id} to Website API.`);
     } catch (error) {
       item._api_error = error.message;
       saveData(data);
@@ -1606,12 +1651,6 @@ async function main() {
   const state = loadState();
   const excludedMyHome = markExcludedDescriptions(data);
   const excludedSs = markExcludedDescriptions(ssData);
-  try {
-    const named = await hydrateAssignedAgentNames(data);
-    if (named) console.log(`Resolved display names for ${named} assigned apartment(s).`);
-  } catch (error) {
-    console.error(`Could not resolve existing agent display names: ${error.message}`);
-  }
   saveData(data);
   saveData(ssData, SS_DATA_PATH, SS_CSV_PATH);
   if (excludedMyHome + excludedSs) {
