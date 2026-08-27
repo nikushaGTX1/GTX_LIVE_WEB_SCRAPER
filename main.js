@@ -29,6 +29,7 @@ const DASHBOARD_CSS_PATH = path.join(ROOT, 'dashboard.css');
 const FAVICON_PATH = path.join(ROOT, 'favicon.svg');
 const STATE_PATH = path.join(DATA_ROOT, 'watcher-state.json');
 const WATCHER_CONFIG_PATH = path.join(DATA_ROOT, 'watcher-config.json');
+const OWNERS_PATH = path.join(DATA_ROOT, 'owners.json');
 const PROFILE_PATH = process.env.WATCHER_PROFILE || path.join(DATA_ROOT, '.browser-profile');
 const IS_HOSTED = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID);
 const SS_SCRAPER_ENABLED = String(process.env.ENABLE_SS_SCRAPER || '').toLowerCase() === 'true';
@@ -206,6 +207,44 @@ function readJsonFile(filePath) {
   try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch { return {}; }
 }
 
+const DEFAULT_OWNERS = {
+  headers: ['მესაკუთრის ID', 'მესაკუთრის ნომერი', 'უბანი', 'ოთახები და საძინებელი', 'კვადრატულობა', 'ფასი', 'ჩემი ID MYHOME', 'ჩემი ID SS.GE', 'კომენტარი/შეთანხმება'],
+  rows: [
+    ['25727280', '555 911 019', 'საბურთალო', '3 ოთახი 2 საძ', '90 კვ', '750$', '25735017', '36412922', 'ინდივიდი არ არის შეთანხმებული'],
+    ['25727267', '575 750 160', 'საბურთალო', '2 ოთახი 1 საძ', '56 კვ', '700$', '25735131', '36413137', 'ინდივიდი და არ არის'],
+    ['18448245', '595 754 645', 'საბურთალო', '3 ოთახი 2 საძ', '90 კვ', '1500$', '25728442', '36413248', 'რუსები და ცხოველები შეთანხმდება'],
+    ['25676903', '599 270 209', 'საბურთალო', '3 ოთახი 2 საძ', '86 კვ', '1300$', '25729067', '36413817', 'სტანდარტული შეთანხმება'],
+    ['25635438', '598 107 830', 'საბურთალო', '2 ოთახი 1 საძ', '60 კვ', '650$', '25730804', '36416280', 'მოკლედ სტანდარტული შეთანხმება'],
+    ['25635442', '557 112 221', 'საბურთალო', '3 ოთახი 2 საძ', '79 კვ', '800$', '25731218', '36416719', 'სტანდარტული შეთანხმება'],
+    ['25690933', '555 478 767', 'საბურთალო', '4 ოთახი 3 საძ', '140 კვ', '1400$', '25732203', '36417844', 'სტანდარტული შეთანხმება'],
+    ['25568180', '593 644 173', 'საბურთალო', '3 ოთახი 1 საძ', '60 კვ', '750$', '25735396', '36417892', 'შეთანხმება ცხოველებზე'],
+    ['25709538', '591 410 500', 'საბურთალო', '3 ოთახი 2 საძ', '63 კვ', '700$', '25735514', '36417947', 'დავუკავშირდეთ შეთანხმებისთვის'],
+    ['25595443', '591 995 594', 'საბურთალო', '2 ოთახი 1 საძ', '54 კვ', '500$', '25735629', '36417988', 'სტანდარტული შეთანხმება']
+  ]
+};
+
+function ownersData() {
+  const saved = readJsonFile(OWNERS_PATH);
+  return Array.isArray(saved.headers) && Array.isArray(saved.rows) ? saved : DEFAULT_OWNERS;
+}
+
+function buildOwnersContent() {
+  const data = ownersData();
+  const head = data.headers.map(header => `<th>${html(header)}</th>`).join('');
+  const rows = data.rows.map(row => `<tr>${data.headers.map((_, index) => `<td>${html(row[index] ?? '')}</td>`).join('')}</tr>`).join('\n');
+  return `<section class="owners-panel" aria-labelledby="owners-title">
+    <div class="owners-toolbar">
+      <div><p class="eyebrow">Owner database</p><h2 id="owners-title">Owners</h2><p id="owners-import-status">${data.rows.length} saved row(s)</p></div>
+      <div class="owners-actions">
+        <input id="owners-file" type="file" accept=".xlsx,.xls,.csv" hidden>
+        <button id="owners-import" class="save-button" type="button">Import Excel</button>
+        <button id="owners-append" type="button">Append Excel</button>
+      </div>
+    </div>
+    <div class="owners-table-wrap"><table class="owners-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>
+  </section>`;
+}
+
 function buildDashboard(viewer = null, view = 'all') {
   let combined = [
     ...Object.values(readJsonFile(DATA_PATH)).map(item => ({ ...item, source: item.source || 'MyHome' })),
@@ -249,14 +288,14 @@ function buildDashboard(viewer = null, view = 'all') {
   if (!fs.existsSync(DASHBOARD_TEMPLATE_PATH)) {
     throw new Error(`Dashboard template is missing: ${DASHBOARD_TEMPLATE_PATH}`);
   }
-  const content = combined.length
+  const content = view === 'owners' ? buildOwnersContent() : combined.length
     ? `<table><thead><tr><th>Source</th><th>District</th><th>Assigned agent</th><th>Link</th>${showManagementComments ? '<th>Comment</th>' : ''}<th>Review</th></tr></thead><tbody>${rows}</tbody></table>`
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
-    .replace('{{LISTING_COUNT}}', String(combined.length))
+    .replace('{{LISTING_COUNT}}', String(view === 'owners' ? ownersData().rows.length : combined.length))
     .replace('{{LOGGED_IN_AS}}', html(viewer?.name || viewer?.email || process.env.DASHBOARD_DISPLAY_USER || process.env.WEBSITE_API_EMAIL || 'Local viewer'))
     .replace('{{LOGGED_IN_ROLE}}', html(viewer?.role || 'admin'))
-    .replace('{{CURRENT_VIEW}}', view === 'accepted' || viewer?.role === 'manager' ? 'accepted' : 'all')
+    .replace('{{CURRENT_VIEW}}', view === 'owners' ? 'owners' : (view === 'accepted' || viewer?.role === 'manager' ? 'accepted' : 'all'))
     .replace('{{DASHBOARD_CONTENT}}', content);
   return document;
 }
@@ -362,7 +401,7 @@ function readRequestJson(request) {
     let body = '';
     request.on('data', chunk => {
       body += chunk;
-      if (body.length > 100_000) reject(new Error('Request body is too large'));
+      if (body.length > 5_000_000) reject(new Error('Request body is too large'));
     });
     request.on('end', () => {
       try { resolve(body ? JSON.parse(body) : {}); } catch { reject(new Error('Invalid JSON body')); }
@@ -537,8 +576,48 @@ function startWebServer() {
       response.end(JSON.stringify({ entries }));
       return;
     }
+    if (pathname === '/api/owners' && request.method === 'GET') {
+      if (!['admin', 'manager'].includes(viewer.role)) {
+        response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: 'Management access is required' }));
+        return;
+      }
+      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      response.end(JSON.stringify(ownersData()));
+      return;
+    }
+    if (pathname === '/api/owners' && request.method === 'POST') {
+      if (!['admin', 'manager'].includes(viewer.role)) {
+        response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: 'Management access is required' }));
+        return;
+      }
+      try {
+        const body = await readRequestJson(request);
+        if (!Array.isArray(body.headers) || !body.headers.length || !Array.isArray(body.rows)) throw new Error('The worksheet is empty');
+        if (body.headers.length > 100 || body.rows.length > 50_000) throw new Error('The worksheet is too large');
+        const headers = body.headers.map(value => clean(value) || 'Column').slice(0, 100);
+        const importedRows = body.rows.map(row => headers.map((_, index) => clean(Array.isArray(row) ? row[index] : '')));
+        let data = { headers, rows: importedRows };
+        if (body.append) {
+          const current = ownersData();
+          if (current.headers.join('\u0000') !== headers.join('\u0000')) throw new Error('Column names must match when appending');
+          data = { headers, rows: [...current.rows, ...importedRows] };
+        }
+        fs.writeFileSync(OWNERS_PATH, JSON.stringify(data, null, 2), 'utf8');
+        response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ ok: true, rowCount: data.rows.length }));
+      } catch (error) {
+        response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: error.message }));
+      }
+      return;
+    }
     if ((pathname === '/' || pathname === '/live-results.html') && request.method === 'GET') {
-      const requestedView = requestUrl.searchParams.get('view') === 'accepted' ? 'accepted' : 'all';
+      const requested = requestUrl.searchParams.get('view');
+      const requestedView = requested === 'owners' && ['admin', 'manager'].includes(viewer.role)
+        ? 'owners'
+        : (requested === 'accepted' ? 'accepted' : 'all');
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store, max-age=0' });
       response.end(buildDashboard(viewer, requestedView));
       return;

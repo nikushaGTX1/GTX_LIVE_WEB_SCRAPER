@@ -372,6 +372,28 @@ a:hover { text-decoration: underline; }
 .source.ss { background: #fff0e4; color: #a84a00; }
 .empty { padding: 64px 24px; color: var(--muted); text-align: center; }
 
+.owners-panel { min-width: 0; }
+.owners-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 18px 20px;
+  border-bottom: 1px solid var(--line);
+}
+.owners-toolbar h2 { margin: 0; font-size: 22px; }
+.owners-toolbar #owners-import-status { margin: 5px 0 0; color: var(--muted); font-size: 12px; }
+.owners-toolbar #owners-import-status.error { color: #b42318; }
+.owners-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.owners-actions button { min-height: 41px; padding: 9px 15px; border-radius: 10px; cursor: pointer; font: inherit; font-weight: 700; }
+.owners-actions #owners-append { border: 1px solid var(--line); background: #fff; color: var(--text); }
+.owners-table-wrap { max-height: calc(100vh - 240px); overflow: auto; }
+.owners-table { min-width: 1150px; }
+.owners-table th { top: 0; white-space: nowrap; }
+.owners-table td { min-width: 120px; font-size: 13px; }
+.owners-table th:last-child,
+.owners-table td:last-child { min-width: 320px; }
+
 @media (max-width: 640px) {
   .dashboard { padding: 22px 14px; }
   .dashboard-header { align-items: flex-start; flex-direction: column; gap: 14px; }
@@ -379,6 +401,9 @@ a:hover { text-decoration: underline; }
   #watcher-form { grid-template-columns: 1fr; }
   .control-heading { align-items: flex-start; }
   .comment-dropdown { grid-template-columns: 1fr; }
+  .owners-toolbar { align-items: flex-start; flex-direction: column; }
+  .owners-actions { width: 100%; }
+  .owners-actions button { flex: 1; }
 }
 
 @media (min-width: 641px) and (max-width: 1000px) {

@@ -31,6 +31,7 @@
     <nav class="management-nav" id="management-nav" data-current-view="{{CURRENT_VIEW}}" hidden aria-label="Management views">
       <a href="/" data-view="all">All apartments</a>
       <a href="/?view=accepted" data-view="accepted">✓ Accepted apartments</a>
+      <a href="/?view=owners" data-view="owners">Owners</a>
       <button id="copy-accepted-links" type="button">Copy accepted links</button>
     </nav>
 
@@ -85,6 +86,7 @@
       {{DASHBOARD_CONTENT}}
     </section>
   </main>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
   <script>
     // Keep the editable template presentable when it is opened directly.
     // main.js replaces these markers with live data in live-results.html.
@@ -103,6 +105,14 @@
     const managementNav = document.getElementById('management-nav');
     if (managementNav.dataset.currentView.includes('{{CURRENT_VIEW}}')) managementNav.dataset.currentView = 'all';
     managementNav.querySelectorAll('a').forEach(link => link.classList.toggle('active', link.dataset.view === managementNav.dataset.currentView));
+    const ownersView = managementNav.dataset.currentView === 'owners';
+    if (ownersView) {
+      document.getElementById('admin-controls').hidden = true;
+      document.querySelector('.district-filters').hidden = true;
+      document.getElementById('refresh-status').textContent = 'Shared owner database';
+      document.querySelector('.listing-count span').textContent = 'owners';
+      document.getElementById('copy-accepted-links').hidden = true;
+    }
     document.getElementById('copy-accepted-links').addEventListener('click', async event => {
       const button = event.currentTarget;
       try {
@@ -152,7 +162,7 @@
 
     const showWatcherConfig = config => {
       watcherConfig = config;
-      document.getElementById('admin-controls').hidden = !config.canAdmin;
+      document.getElementById('admin-controls').hidden = ownersView || !config.canAdmin;
       managementNav.hidden = !config.canManage;
       const assignment = document.getElementById('assignment-status');
       assignment.textContent = config.assignment?.enabled
@@ -256,6 +266,42 @@
       }).then(() => { document.getElementById('watcher-url').value = ''; })
         .catch(error => { message.textContent = error.message; });
     });
+    const ownersFile = document.getElementById('owners-file');
+    let appendOwners = false;
+    const chooseOwnersFile = append => {
+      appendOwners = append;
+      ownersFile.value = '';
+      ownersFile.click();
+    };
+    document.getElementById('owners-import')?.addEventListener('click', () => chooseOwnersFile(false));
+    document.getElementById('owners-append')?.addEventListener('click', () => chooseOwnersFile(true));
+    ownersFile?.addEventListener('change', async () => {
+      const file = ownersFile.files[0];
+      if (!file) return;
+      const status = document.getElementById('owners-import-status');
+      try {
+        if (!window.XLSX) throw new Error('Excel reader could not load. Check your internet connection and try again.');
+        status.textContent = `Reading ${file.name}…`;
+        const workbook = XLSX.read(await file.arrayBuffer(), { type: 'array', cellDates: true });
+        const sheet = workbook.Sheets[workbook.SheetNames[0]];
+        const matrix = XLSX.utils.sheet_to_json(sheet, { header: 1, defval: '', raw: false });
+        const nonEmpty = matrix.filter(row => row.some(cell => String(cell).trim()));
+        if (nonEmpty.length < 2) throw new Error('The first worksheet needs a header row and at least one data row.');
+        const headers = nonEmpty[0].map((cell, index) => String(cell).trim() || `Column ${index + 1}`);
+        const rows = nonEmpty.slice(1).map(row => headers.map((_, index) => row[index] ?? ''));
+        const response = await fetch('/api/owners', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ headers, rows, append: appendOwners })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Could not import the workbook');
+        status.textContent = `Imported ${rows.length} row(s). Reloading…`;
+        location.reload();
+      } catch (error) {
+        status.textContent = error.message;
+        status.classList.add('error');
+      }
+    });
     const saveReview = async (row, action, comment = '', extra = {}) => {
       const response = await fetch(`/api/apartments/${row.dataset.apartmentId}/review`, {
         method: 'POST',
@@ -319,7 +365,7 @@
     });
     setInterval(() => {
       const editingReview = document.activeElement.closest?.('.comment-row');
-      if (watcherConfig?.enabled && !editingReview && Date.now() > reviewInteractionUntil && !document.activeElement.closest?.('.admin-controls')) location.reload();
+      if (!ownersView && watcherConfig?.enabled && !editingReview && Date.now() > reviewInteractionUntil && !document.activeElement.closest?.('.admin-controls')) location.reload();
     }, 3000);
   </script>
 </body>
