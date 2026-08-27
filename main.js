@@ -510,6 +510,7 @@ async function reviewApartment(request, response, viewer, apartmentId) {
     const body = await readRequestJson(request);
     if (!['accepted', 'rejected', 'manager-selection'].includes(body.action)) throw new Error('Invalid review action');
     const comment = clean(body.comment || '').slice(0, 2000);
+    if (body.action === 'accepted' && !comment) throw new Error('A comment is required to accept an apartment');
     const myHomeData = liveMyHomeData || loadData();
     const ssData = liveSsData || loadSsData();
     const data = myHomeData[apartmentId] ? myHomeData : ssData;

@@ -394,12 +394,19 @@
             location.href = '/?view=owners';
             return;
           }
-          await saveReview(row, 'accepted', commentRow.querySelector('.review-comment').value);
-          location.href = '/?view=owners';
+          row.classList.add('review-accepting');
+          commentRow.hidden = false;
+          commentRow.querySelector('.review-comment').focus();
+          setTimeout(() => row.classList.remove('review-accepting'), 650);
           return;
         }
         if (event.target.closest('.save-comment')) {
-          const comment = commentRow.querySelector('.review-comment').value;
+          const comment = commentRow.querySelector('.review-comment').value.trim();
+          if (!comment) {
+            commentRow.querySelector('.review-comment').focus();
+            alert('Please add a comment before accepting this apartment.');
+            return;
+          }
           await saveReview(row, 'accepted', comment);
           location.href = '/?view=owners';
         }
