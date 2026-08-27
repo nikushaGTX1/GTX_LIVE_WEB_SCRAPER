@@ -269,15 +269,16 @@ function buildDashboard(viewer = null, view = 'all') {
   ].filter(item => !item._baseline && !item._excluded && item._review_status !== 'rejected' && !hasExcludedDescription(item.description))
     .sort((a, b) => String(b.first_seen).localeCompare(String(a.first_seen)));
   if (viewer?.role === 'agent') {
-    combined = combined.filter(item =>
-      String(item.assigned_agent_id || '') === viewer.agentId && item._review_status !== 'accepted'
-    );
+    combined = combined.filter(item => {
+      if (String(item.assigned_agent_id || '') !== viewer.agentId) return false;
+      return view === 'accepted' ? item._review_status === 'accepted' : item._review_status !== 'accepted';
+    });
   }
-  if (view === 'accepted' || viewer?.role === 'manager') {
+  if ((view === 'accepted' && viewer?.role !== 'agent') || viewer?.role === 'manager') {
     combined = combined.filter(item => item._review_status === 'accepted');
   }
-  const showManagementComments = ['admin', 'manager'].includes(viewer?.role) &&
-    (view === 'accepted' || viewer?.role === 'manager');
+  const showManagementComments = view === 'accepted' || viewer?.role === 'manager';
+  const canManageSelection = ['admin', 'manager'].includes(viewer?.role) && showManagementComments;
 
   const rows = combined.map(item => `<tr data-apartment-id="${html(item.apartment_id)}" data-district="${html(item.district || 'Other')}" class="apartment-row ${item._review_status === 'accepted' ? 'review-accepted' : ''}">
     <td><span class="source ${item.source === 'SS.ge' ? 'ss' : ''}">${html(item.source)}</span></td>
@@ -287,7 +288,7 @@ function buildDashboard(viewer = null, view = 'all') {
     ${showManagementComments ? `<td class="management-comment"><strong>${html(item._review_comment || 'No comment')}</strong><small>${item._reviewed_by ? `By ${html(item._reviewed_by)}` : ''}${item._reviewed_at ? ` · ${html(item._reviewed_at)}` : ''}</small></td>` : ''}
     <td class="review-cell">
       <div class="review-buttons">
-        <button class="review-button accept-button${showManagementComments && item._manager_selected ? ' selected' : ''}" type="button" title="${showManagementComments ? 'Toggle manager selection' : 'Accept and comment'}" aria-label="${showManagementComments ? 'Toggle manager selection' : 'Accept apartment'}" aria-pressed="${showManagementComments ? String(Boolean(item._manager_selected)) : 'false'}">✓</button>
+        <button class="review-button accept-button${canManageSelection && item._manager_selected ? ' selected' : ''}" type="button" title="${canManageSelection ? 'Toggle manager selection' : 'Accept and comment'}" aria-label="${canManageSelection ? 'Toggle manager selection' : 'Accept apartment'}" aria-pressed="${canManageSelection ? String(Boolean(item._manager_selected)) : 'false'}">✓</button>
         <button class="review-button reject-button" type="button" title="Reject apartment" aria-label="Reject apartment">×</button>
       </div>
     </td>

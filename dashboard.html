@@ -30,7 +30,7 @@
 
     <nav class="management-nav" id="management-nav" data-current-view="{{CURRENT_VIEW}}" hidden aria-label="Management views">
       <a href="/" data-view="all">All apartments</a>
-      <a href="/?view=accepted" data-view="accepted" data-management-only>✓ Accepted apartments</a>
+      <a href="/?view=accepted" data-view="accepted">✓ Accepted apartments</a>
       <a href="/?view=owners" data-view="owners">Owners</a>
       <button id="copy-accepted-links" type="button" data-management-only>Copy accepted links</button>
     </nav>
@@ -387,7 +387,7 @@
           return;
         }
         if (event.target.closest('.accept-button')) {
-          if (row.querySelector('.management-comment')) {
+          if (row.querySelector('.management-comment') && ['admin', 'manager'].includes(watcherConfig?.viewer?.role)) {
             const button = event.target.closest('.accept-button');
             const selected = !button.classList.contains('selected');
             await saveReview(row, 'manager-selection', '', { selected });
