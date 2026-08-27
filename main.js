@@ -76,6 +76,7 @@ let websiteApiToken = '';
 let websiteApiAgents = [];
 let dashboardUploadAgents = [];
 let dashboardUploadsRefreshedAt = 0;
+let dashboardUploadsRefreshPromise = null;
 let watcherRuntime = null;
 let liveMyHomeData = null;
 let liveSsData = null;
@@ -679,9 +680,10 @@ function startWebServer() {
     if ((pathname === '/' || pathname === '/live-results.html') && request.method === 'GET') {
       const requested = requestUrl.searchParams.get('view');
       const requestedView = requested === 'owners' ? 'owners' : (requested === 'accepted' ? 'accepted' : 'all');
-      if (requestedView !== 'owners') await hydrateListingUploadHistory().catch(error => {
-        console.error(`Could not refresh listing upload history: ${error.message}`);
-      });
+      if(requestedView!=='owners')await Promise.race([
+        refreshListingUploadHistory(),
+        new Promise(resolve=>setTimeout(resolve,4000))
+      ]);
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store, max-age=0' });
       response.end(buildDashboard(viewer, requestedView));
       return;
@@ -1318,6 +1320,15 @@ async function hydrateListingUploadHistory() {
   }
   dashboardUploadAgents.sort((left,right)=>left.name.localeCompare(right.name));
   dashboardUploadsRefreshedAt = Date.now();
+}
+
+function refreshListingUploadHistory(){
+  if(!dashboardUploadsRefreshPromise){
+    dashboardUploadsRefreshPromise=hydrateListingUploadHistory()
+      .catch(error=>console.error(`Could not refresh listing upload history: ${error.message}`))
+      .finally(()=>{dashboardUploadsRefreshPromise=null;});
+  }
+  return dashboardUploadsRefreshPromise;
 }
 
 function positiveNumber(value) {
