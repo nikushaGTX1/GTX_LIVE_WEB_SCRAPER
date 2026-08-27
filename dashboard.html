@@ -321,6 +321,46 @@
       removeOwnerRows(`index=${encodeURIComponent(button.dataset.ownerIndex)}`)
         .catch(error => { button.disabled = false; alert(error.message); });
     });
+    const saveOwnerCell = async cell => {
+      const value = cell.textContent.trim();
+      if (value === cell.dataset.savedValue) return;
+      cell.classList.add('saving');
+      const response = await fetch('/api/owners', {
+        method: 'PATCH', headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ rowIndex: Number(cell.dataset.ownerIndex), columnIndex: Number(cell.dataset.ownerColumn), value })
+      });
+      const result = await response.json();
+      cell.classList.remove('saving');
+      if (!response.ok) throw new Error(result.error || 'Could not save this cell');
+      cell.dataset.savedValue = value;
+      cell.classList.add('saved');
+      setTimeout(() => cell.classList.remove('saved'), 700);
+    };
+    document.querySelectorAll('.owner-cell').forEach(cell => { cell.dataset.savedValue = cell.textContent.trim(); });
+    document.querySelector('.owners-table')?.addEventListener('focusout', event => {
+      const cell = event.target.closest('.owner-cell');
+      if (cell) saveOwnerCell(cell).catch(error => alert(error.message));
+    });
+    document.querySelector('.owners-table')?.addEventListener('keydown', event => {
+      const cell = event.target.closest('.owner-cell');
+      if (!cell || event.key !== 'Enter') return;
+      event.preventDefault();
+      cell.blur();
+    });
+    document.getElementById('owners-add-row')?.addEventListener('click', async event => {
+      event.currentTarget.disabled = true;
+      try {
+        const response = await fetch('/api/owners', {
+          method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ addRow: true })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Could not add a row');
+        location.reload();
+      } catch (error) {
+        event.currentTarget.disabled = false;
+        alert(error.message);
+      }
+    });
     const saveReview = async (row, action, comment = '', extra = {}) => {
       const response = await fetch(`/api/apartments/${row.dataset.apartmentId}/review`, {
         method: 'POST',
@@ -343,9 +383,7 @@
         if (event.target.closest('.reject-button')) {
           if (!confirm('Reject and remove this apartment from your list?')) return;
           await saveReview(row, 'rejected');
-          row.classList.add('review-rejecting');
-          commentRow.hidden = true;
-          setTimeout(() => { row.remove(); commentRow.remove(); }, 450);
+          location.href = '/?view=owners';
           return;
         }
         if (event.target.closest('.accept-button')) {
@@ -353,30 +391,17 @@
             const button = event.target.closest('.accept-button');
             const selected = !button.classList.contains('selected');
             await saveReview(row, 'manager-selection', '', { selected });
-            button.classList.toggle('selected', selected);
-            button.setAttribute('aria-pressed', String(selected));
-            commentRow.hidden = true;
-            row.classList.add('review-accepting');
-            setTimeout(() => row.classList.remove('review-accepting'), 650);
+            location.href = '/?view=owners';
             return;
           }
-          row.classList.add('review-accepting');
-          commentRow.hidden = false;
-          commentRow.querySelector('.review-comment').focus();
-          setTimeout(() => row.classList.remove('review-accepting'), 650);
+          await saveReview(row, 'accepted', commentRow.querySelector('.review-comment').value);
+          location.href = '/?view=owners';
           return;
         }
         if (event.target.closest('.save-comment')) {
           const comment = commentRow.querySelector('.review-comment').value;
           await saveReview(row, 'accepted', comment);
-          row.classList.add('review-accepting', 'review-accepted');
-          setTimeout(() => {
-            row.classList.remove('review-accepting');
-            if (watcherConfig?.viewer?.role === 'agent') {
-              row.remove();
-              commentRow.remove();
-            }
-          }, 650);
+          location.href = '/?view=owners';
         }
       } catch (error) {
         alert(error.message);

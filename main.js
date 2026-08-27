@@ -246,12 +246,13 @@ function ownersData(viewer) {
 function buildOwnersContent(viewer) {
   const data = ownersData(viewer);
   const head = `${data.headers.map(header => `<th>${html(header)}</th>`).join('')}<th class="owner-actions-column">Actions</th>`;
-  const rows = data.rows.map((row, rowIndex) => `<tr data-owner-row="${rowIndex}">${data.headers.map((_, index) => `<td>${html(row[index] ?? '')}</td>`).join('')}<td class="owner-row-actions"><button class="owner-remove" type="button" data-owner-index="${rowIndex}" aria-label="Remove owner row">Remove</button></td></tr>`).join('\n');
+  const rows = data.rows.map((row, rowIndex) => `<tr data-owner-row="${rowIndex}">${data.headers.map((_, columnIndex) => `<td class="owner-cell" contenteditable="true" spellcheck="false" data-owner-index="${rowIndex}" data-owner-column="${columnIndex}">${html(row[columnIndex] ?? '')}</td>`).join('')}<td class="owner-row-actions"><button class="owner-remove" type="button" data-owner-index="${rowIndex}" aria-label="Remove owner row">Remove</button></td></tr>`).join('\n');
   return `<section class="owners-panel" aria-labelledby="owners-title">
     <div class="owners-toolbar">
       <div><p class="eyebrow">Owner database</p><h2 id="owners-title">Owners</h2><p id="owners-import-status">${data.rows.length} saved row(s)</p></div>
       <div class="owners-actions">
         <input id="owners-file" type="file" accept=".xlsx,.xls,.csv" hidden>
+        <button id="owners-add-row" type="button">Add row</button>
         <button id="owners-import" class="save-button" type="button">Import Excel</button>
         <button id="owners-append" type="button">Append Excel</button>
         <button id="owners-remove-all" type="button">Remove all</button>
@@ -609,6 +610,27 @@ function startWebServer() {
           const current = ownersData(viewer);
           if (current.headers.join('\u0000') !== headers.join('\u0000')) throw new Error('Column names must match when appending');
           data = { headers, rows: [...current.rows, ...importedRows] };
+        }
+        fs.writeFileSync(ownersPathFor(viewer), JSON.stringify(data, null, 2), 'utf8');
+        response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ ok: true, rowCount: data.rows.length }));
+      } catch (error) {
+        response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: error.message }));
+      }
+      return;
+    }
+    if (pathname === '/api/owners' && request.method === 'PATCH') {
+      try {
+        const body = await readRequestJson(request);
+        const data = ownersData(viewer);
+        if (body.addRow === true) data.rows.push(data.headers.map(() => ''));
+        else {
+          const rowIndex = Number(body.rowIndex);
+          const columnIndex = Number(body.columnIndex);
+          if (!Number.isInteger(rowIndex) || rowIndex < 0 || rowIndex >= data.rows.length) throw new Error('Owner row was not found');
+          if (!Number.isInteger(columnIndex) || columnIndex < 0 || columnIndex >= data.headers.length) throw new Error('Owner column was not found');
+          data.rows[rowIndex][columnIndex] = clean(body.value);
         }
         fs.writeFileSync(ownersPathFor(viewer), JSON.stringify(data, null, 2), 'utf8');
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
