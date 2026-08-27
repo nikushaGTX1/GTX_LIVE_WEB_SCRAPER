@@ -280,7 +280,10 @@ function buildDashboard(viewer = null, view = 'all') {
   const canManageSelection = ['admin', 'manager'].includes(viewer?.role) && showManagementComments;
   const uploadAgents = dashboardUploadAgents;
   const uploadCell = (item, agent) => {
-    const uploads = (item._listing_uploads || []).filter(upload => String(upload.agentUserId || '') === String(agent.id));
+    const agentName = clean(agent.name).toLocaleLowerCase();
+    const uploads = (item._listing_uploads || []).filter(upload =>
+      String(upload.agentUserId || '') === String(agent.id) ||
+      (!upload.agentUserId && clean(upload.agentName).toLocaleLowerCase() === agentName));
     if (!uploads.length) return '<td class="upload-ids empty-upload">—</td>';
     return `<td class="upload-ids">${uploads.map(upload => {
       const label = upload.platform === 'myhome' ? 'MH' : 'SS';
@@ -1171,6 +1174,12 @@ function responseItems(payload) {
   return [];
 }
 
+function listingUploadItems(payload) {
+  const items = responseItems(payload);
+  if (items.length) return items;
+  return payload && typeof payload === 'object' && payload.publishedListingId ? [payload] : [];
+}
+
 function agentDisplayName(agent) {
   const person = agent?.user || agent?.profile || agent;
   return clean(person?.fullName || person?.name || person?.displayName ||
@@ -1257,7 +1266,6 @@ async function hydrateAssignedAgentNames(data) {
 async function hydrateListingUploadHistory() {
   if (!process.env.WEBSITE_API_EMAIL || !process.env.WEBSITE_API_PASSWORD) return;
   if (Date.now() - dashboardUploadsRefreshedAt < 30_000) return;
-  dashboardUploadsRefreshedAt = Date.now();
   if (!websiteApiToken && !await loginWebsiteApi()) return;
 
   const agentPayload = await websiteApiRequest('/api/Agents');
@@ -1285,10 +1293,16 @@ async function hydrateListingUploadHistory() {
           if (Number.isInteger(apartmentId) && apartmentId > 0) { item._website_api_apartment_id = apartmentId; changed = true; }
         }
         const sourcePlatform = item.source === 'SS.ge' ? 'ssge' : 'myhome';
-        const uploadPath = Number.isInteger(apartmentId) && apartmentId > 0
-          ? `/api/Apartments/${apartmentId}/uploads`
-          : `/api/ListingUploads?sourcePlatform=${sourcePlatform}&sourceListingId=${encodeURIComponent(item.apartment_id)}`;
-        const uploads = responseItems(await websiteApiRequest(uploadPath));
+        const uploadPaths = [`/api/ListingUploads?sourcePlatform=${sourcePlatform}&sourceListingId=${encodeURIComponent(item.apartment_id)}`];
+        if(Number.isInteger(apartmentId)&&apartmentId>0)uploadPaths.push(`/api/Apartments/${apartmentId}/uploads`);
+        const uploadGroups=await Promise.all(uploadPaths.map(path=>websiteApiRequest(path).then(listingUploadItems)));
+        const uploads=[...new Map(uploadGroups.flat().map(upload=>[
+          String(upload.id||`${upload.agentUserId}:${upload.platform}:${upload.publishedListingId}`),upload
+        ])).values()].sort((left,right)=>String(left.uploadedAt||'').localeCompare(String(right.uploadedAt||'')));
+        for (const upload of uploads) {
+          const id=String(upload.agentUserId||'');if(!id)continue;
+          if(!dashboardUploadAgents.some(agent=>agent.id===id))dashboardUploadAgents.push({id,name:clean(upload.agentName)||id});
+        }
         if (JSON.stringify(item._listing_uploads || []) !== JSON.stringify(uploads)) {
           item._listing_uploads = uploads;
           changed = true;
@@ -1299,6 +1313,8 @@ async function hydrateListingUploadHistory() {
     }
     if (changed) source.save(source.data);
   }
+  dashboardUploadAgents.sort((left,right)=>left.name.localeCompare(right.name));
+  dashboardUploadsRefreshedAt = Date.now();
 }
 
 function positiveNumber(value) {
