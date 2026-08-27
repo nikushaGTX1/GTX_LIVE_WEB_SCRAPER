@@ -151,11 +151,14 @@
     };
     document.querySelectorAll('.district-filter').forEach(button => {
       button.addEventListener('click', () => {
-        localStorage.setItem('apartment-district', button.dataset.district);
+        localStorage.setItem(`apartment-district-${managementNav.dataset.currentView}`, button.dataset.district);
         applyDistrict(button.dataset.district);
       });
     });
-    const savedDistrict = localStorage.getItem('apartment-district') || 'all';
+    const districtStorageKey = `apartment-district-${managementNav.dataset.currentView}`;
+    const savedDistrict = managementNav.dataset.currentView === 'accepted'
+      ? 'all'
+      : (localStorage.getItem(districtStorageKey) || 'all');
     const knownDistrict = [...document.querySelectorAll('.district-filter')]
       .some(button => button.dataset.district === savedDistrict);
     applyDistrict(knownDistrict ? savedDistrict : 'all');

@@ -611,7 +611,7 @@ function startWebServer() {
         if (body.append) {
           const current = ownersData(viewer);
           if (current.headers.join('\u0000') !== headers.join('\u0000')) throw new Error('Column names must match when appending');
-          data = { headers, rows: [...current.rows, ...importedRows] };
+          data = { headers, rows: [...importedRows, ...current.rows] };
         }
         fs.writeFileSync(ownersPathFor(viewer), JSON.stringify(data, null, 2), 'utf8');
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
@@ -626,7 +626,7 @@ function startWebServer() {
       try {
         const body = await readRequestJson(request);
         const data = ownersData(viewer);
-        if (body.addRow === true) data.rows.push(data.headers.map(() => ''));
+        if (body.addRow === true) data.rows.unshift(data.headers.map(() => ''));
         else {
           const rowIndex = Number(body.rowIndex);
           const columnIndex = Number(body.columnIndex);
