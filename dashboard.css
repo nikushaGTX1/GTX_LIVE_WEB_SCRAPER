@@ -102,6 +102,7 @@ h1 {
 .management-nav a { padding: 9px 13px; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--muted); font-size: 13px; font-weight: 700; }
 .management-nav a.active { border-color: #20a464; background: #e5f7ed; color: #087443; }
 .management-nav button { margin-left: auto; padding: 9px 13px; border: 0; border-radius: 10px; background: #172033; color: #fff; cursor: pointer; font: inherit; font-size: 13px; font-weight: 700; }
+.management-nav [hidden] { display: none; }
 
 .admin-controls {
   margin-bottom: 16px;
@@ -387,12 +388,18 @@ a:hover { text-decoration: underline; }
 .owners-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .owners-actions button { min-height: 41px; padding: 9px 15px; border-radius: 10px; cursor: pointer; font: inherit; font-weight: 700; }
 .owners-actions #owners-append { border: 1px solid var(--line); background: #fff; color: var(--text); }
+.owners-actions #owners-remove-all { border: 1px solid #f2b8b5; background: #fff5f5; color: #b42318; }
 .owners-table-wrap { max-height: calc(100vh - 240px); overflow: auto; }
 .owners-table { min-width: 1150px; }
 .owners-table th { top: 0; white-space: nowrap; }
 .owners-table td { min-width: 120px; font-size: 13px; }
-.owners-table th:last-child,
-.owners-table td:last-child { min-width: 320px; }
+.owners-table th:nth-last-child(2),
+.owners-table td:nth-last-child(2) { min-width: 320px; }
+.owners-table .owner-actions-column,
+.owners-table .owner-row-actions { min-width: 94px; width: 94px; text-align: center; }
+.owner-remove { padding: 7px 10px; border: 1px solid #f2b8b5; border-radius: 8px; background: #fff5f5; color: #b42318; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
+.owner-remove:hover { background: #b42318; color: #fff; }
+.owner-remove:disabled { cursor: wait; opacity: .55; }
 
 @media (max-width: 640px) {
   .dashboard { padding: 22px 14px; }

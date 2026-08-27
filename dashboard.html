@@ -30,9 +30,9 @@
 
     <nav class="management-nav" id="management-nav" data-current-view="{{CURRENT_VIEW}}" hidden aria-label="Management views">
       <a href="/" data-view="all">All apartments</a>
-      <a href="/?view=accepted" data-view="accepted">✓ Accepted apartments</a>
+      <a href="/?view=accepted" data-view="accepted" data-management-only>✓ Accepted apartments</a>
       <a href="/?view=owners" data-view="owners">Owners</a>
-      <button id="copy-accepted-links" type="button">Copy accepted links</button>
+      <button id="copy-accepted-links" type="button" data-management-only>Copy accepted links</button>
     </nav>
 
     <section class="admin-controls" id="admin-controls" aria-labelledby="watcher-controls-title">
@@ -109,7 +109,7 @@
     if (ownersView) {
       document.getElementById('admin-controls').hidden = true;
       document.querySelector('.district-filters').hidden = true;
-      document.getElementById('refresh-status').textContent = 'Shared owner database';
+      document.getElementById('refresh-status').textContent = 'Your private owner database';
       document.querySelector('.listing-count span').textContent = 'owners';
       document.getElementById('copy-accepted-links').hidden = true;
     }
@@ -163,7 +163,8 @@
     const showWatcherConfig = config => {
       watcherConfig = config;
       document.getElementById('admin-controls').hidden = ownersView || !config.canAdmin;
-      managementNav.hidden = !config.canManage;
+      managementNav.hidden = false;
+      managementNav.querySelectorAll('[data-management-only]').forEach(item => { item.hidden = !config.canManage; });
       const assignment = document.getElementById('assignment-status');
       assignment.textContent = config.assignment?.enabled
         ? `Round-robin assignment enabled · ${config.assignment.pending} pending API uploads`
@@ -172,8 +173,9 @@
       assignment.classList.toggle('warning', !config.assignment?.enabled || config.assignment.pending > 0);
       toggle.textContent = config.enabled ? 'Stop scraper' : 'Start scraper';
       toggle.classList.toggle('running', config.enabled);
-      document.getElementById('refresh-status').textContent = config.enabled
-        ? 'Auto-refreshes every 3 seconds' : 'Dashboard refresh paused';
+      document.getElementById('refresh-status').textContent = ownersView
+        ? 'Your private owner database'
+        : (config.enabled ? 'Auto-refreshes every 3 seconds' : 'Dashboard refresh paused');
       document.getElementById('watcher-pages').value = config.pages;
       document.getElementById('watcher-interval').value = config.interval;
       const searchList = document.getElementById('active-searches');
@@ -301,6 +303,23 @@
         status.textContent = error.message;
         status.classList.add('error');
       }
+    });
+    const removeOwnerRows = async query => {
+      const response = await fetch(`/api/owners?${query}`, { method: 'DELETE' });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Could not remove owner data');
+      location.reload();
+    };
+    document.getElementById('owners-remove-all')?.addEventListener('click', () => {
+      if (!confirm('Remove every row from your Owners database? This cannot be undone.')) return;
+      removeOwnerRows('all=true').catch(error => alert(error.message));
+    });
+    document.querySelector('.owners-table')?.addEventListener('click', event => {
+      const button = event.target.closest('.owner-remove');
+      if (!button || !confirm('Remove this owner row?')) return;
+      button.disabled = true;
+      removeOwnerRows(`index=${encodeURIComponent(button.dataset.ownerIndex)}`)
+        .catch(error => { button.disabled = false; alert(error.message); });
     });
     const saveReview = async (row, action, comment = '', extra = {}) => {
       const response = await fetch(`/api/apartments/${row.dataset.apartmentId}/review`, {

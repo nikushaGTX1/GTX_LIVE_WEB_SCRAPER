@@ -223,15 +223,30 @@ const DEFAULT_OWNERS = {
   ]
 };
 
-function ownersData() {
-  const saved = readJsonFile(OWNERS_PATH);
-  return Array.isArray(saved.headers) && Array.isArray(saved.rows) ? saved : DEFAULT_OWNERS;
+function ownerAccountKey(viewer) {
+  const identity = clean(viewer?.email || viewer?.agentId || viewer?.name || 'local-viewer').toLowerCase();
+  return crypto.createHash('sha256').update(identity).digest('hex').slice(0, 24);
 }
 
-function buildOwnersContent() {
-  const data = ownersData();
-  const head = data.headers.map(header => `<th>${html(header)}</th>`).join('');
-  const rows = data.rows.map(row => `<tr>${data.headers.map((_, index) => `<td>${html(row[index] ?? '')}</td>`).join('')}</tr>`).join('\n');
+function ownersPathFor(viewer) {
+  return path.join(DATA_ROOT, `owners-${ownerAccountKey(viewer)}.json`);
+}
+
+function ownersData(viewer) {
+  const accountPath = ownersPathFor(viewer);
+  // Give the first authenticated account the old shared database, then remove
+  // the shared copy so it can never be exposed to another account.
+  if (!fs.existsSync(accountPath) && fs.existsSync(OWNERS_PATH)) fs.renameSync(OWNERS_PATH, accountPath);
+  const saved = readJsonFile(accountPath);
+  return Array.isArray(saved.headers) && Array.isArray(saved.rows)
+    ? saved
+    : { headers: DEFAULT_OWNERS.headers, rows: [] };
+}
+
+function buildOwnersContent(viewer) {
+  const data = ownersData(viewer);
+  const head = `${data.headers.map(header => `<th>${html(header)}</th>`).join('')}<th class="owner-actions-column">Actions</th>`;
+  const rows = data.rows.map((row, rowIndex) => `<tr data-owner-row="${rowIndex}">${data.headers.map((_, index) => `<td>${html(row[index] ?? '')}</td>`).join('')}<td class="owner-row-actions"><button class="owner-remove" type="button" data-owner-index="${rowIndex}" aria-label="Remove owner row">Remove</button></td></tr>`).join('\n');
   return `<section class="owners-panel" aria-labelledby="owners-title">
     <div class="owners-toolbar">
       <div><p class="eyebrow">Owner database</p><h2 id="owners-title">Owners</h2><p id="owners-import-status">${data.rows.length} saved row(s)</p></div>
@@ -239,6 +254,7 @@ function buildOwnersContent() {
         <input id="owners-file" type="file" accept=".xlsx,.xls,.csv" hidden>
         <button id="owners-import" class="save-button" type="button">Import Excel</button>
         <button id="owners-append" type="button">Append Excel</button>
+        <button id="owners-remove-all" type="button">Remove all</button>
       </div>
     </div>
     <div class="owners-table-wrap"><table class="owners-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>
@@ -288,11 +304,11 @@ function buildDashboard(viewer = null, view = 'all') {
   if (!fs.existsSync(DASHBOARD_TEMPLATE_PATH)) {
     throw new Error(`Dashboard template is missing: ${DASHBOARD_TEMPLATE_PATH}`);
   }
-  const content = view === 'owners' ? buildOwnersContent() : combined.length
+  const content = view === 'owners' ? buildOwnersContent(viewer) : combined.length
     ? `<table><thead><tr><th>Source</th><th>District</th><th>Assigned agent</th><th>Link</th>${showManagementComments ? '<th>Comment</th>' : ''}<th>Review</th></tr></thead><tbody>${rows}</tbody></table>`
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
-    .replace('{{LISTING_COUNT}}', String(view === 'owners' ? ownersData().rows.length : combined.length))
+    .replace('{{LISTING_COUNT}}', String(view === 'owners' ? ownersData(viewer).rows.length : combined.length))
     .replace('{{LOGGED_IN_AS}}', html(viewer?.name || viewer?.email || process.env.DASHBOARD_DISPLAY_USER || process.env.WEBSITE_API_EMAIL || 'Local viewer'))
     .replace('{{LOGGED_IN_ROLE}}', html(viewer?.role || 'admin'))
     .replace('{{CURRENT_VIEW}}', view === 'owners' ? 'owners' : (view === 'accepted' || viewer?.role === 'manager' ? 'accepted' : 'all'))
@@ -577,21 +593,11 @@ function startWebServer() {
       return;
     }
     if (pathname === '/api/owners' && request.method === 'GET') {
-      if (!['admin', 'manager'].includes(viewer.role)) {
-        response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
-        response.end(JSON.stringify({ error: 'Management access is required' }));
-        return;
-      }
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-      response.end(JSON.stringify(ownersData()));
+      response.end(JSON.stringify(ownersData(viewer)));
       return;
     }
     if (pathname === '/api/owners' && request.method === 'POST') {
-      if (!['admin', 'manager'].includes(viewer.role)) {
-        response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
-        response.end(JSON.stringify({ error: 'Management access is required' }));
-        return;
-      }
       try {
         const body = await readRequestJson(request);
         if (!Array.isArray(body.headers) || !body.headers.length || !Array.isArray(body.rows)) throw new Error('The worksheet is empty');
@@ -600,11 +606,29 @@ function startWebServer() {
         const importedRows = body.rows.map(row => headers.map((_, index) => clean(Array.isArray(row) ? row[index] : '')));
         let data = { headers, rows: importedRows };
         if (body.append) {
-          const current = ownersData();
+          const current = ownersData(viewer);
           if (current.headers.join('\u0000') !== headers.join('\u0000')) throw new Error('Column names must match when appending');
           data = { headers, rows: [...current.rows, ...importedRows] };
         }
-        fs.writeFileSync(OWNERS_PATH, JSON.stringify(data, null, 2), 'utf8');
+        fs.writeFileSync(ownersPathFor(viewer), JSON.stringify(data, null, 2), 'utf8');
+        response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ ok: true, rowCount: data.rows.length }));
+      } catch (error) {
+        response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: error.message }));
+      }
+      return;
+    }
+    if (pathname === '/api/owners' && request.method === 'DELETE') {
+      try {
+        const data = ownersData(viewer);
+        if (requestUrl.searchParams.get('all') === 'true') data.rows = [];
+        else {
+          const index = Number(requestUrl.searchParams.get('index'));
+          if (!Number.isInteger(index) || index < 0 || index >= data.rows.length) throw new Error('Owner row was not found');
+          data.rows.splice(index, 1);
+        }
+        fs.writeFileSync(ownersPathFor(viewer), JSON.stringify(data, null, 2), 'utf8');
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify({ ok: true, rowCount: data.rows.length }));
       } catch (error) {
@@ -615,9 +639,7 @@ function startWebServer() {
     }
     if ((pathname === '/' || pathname === '/live-results.html') && request.method === 'GET') {
       const requested = requestUrl.searchParams.get('view');
-      const requestedView = requested === 'owners' && ['admin', 'manager'].includes(viewer.role)
-        ? 'owners'
-        : (requested === 'accepted' ? 'accepted' : 'all');
+      const requestedView = requested === 'owners' ? 'owners' : (requested === 'accepted' ? 'accepted' : 'all');
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store, max-age=0' });
       response.end(buildDashboard(viewer, requestedView));
       return;
