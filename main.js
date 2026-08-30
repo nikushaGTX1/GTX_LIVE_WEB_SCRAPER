@@ -86,7 +86,6 @@ const watcherStatus = {
   importTotal: 0, lastStartedAt: null, lastCompletedAt: null, lastError: null
 };
 const dashboardApiSessions = new Map();
-const streetResolutionCache = new Map();
 
 function clean(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -99,6 +98,18 @@ function normalizedDescription(value) {
 function hasExcludedDescription(value) {
   const description = normalizedDescription(value);
   return EXCLUDED_DESCRIPTION_PHRASES.some(phrase => description.includes(phrase));
+}
+
+
+function clearLegacyStreetUploadErrors(data) {
+  let changed = 0;
+  for (const item of Object.values(data)) {
+    if (!item._api_uploaded && /Canonical StreetId|resolve-street|StreetId/i.test(String(item._api_error || ''))) {
+      delete item._api_error;
+      changed += 1;
+    }
+  }
+  return changed;
 }
 
 function markExcludedDescriptions(data) {
@@ -318,47 +329,42 @@ function buildDashboard(viewer = null, view = 'all') {
     ...Object.values(readJsonFile(SS_DATA_PATH)).map(item => ({ ...item, source: 'SS.ge' }))
   ].filter(item => !item._baseline && !item._excluded && item._review_status !== 'rejected' && !hasExcludedDescription(item.description))
     .sort((a, b) => String(b.first_seen).localeCompare(String(a.first_seen)));
-  combined = combined.filter(item => view === 'accepted'
-    ? item._review_status === 'accepted'
-    : item._review_status !== 'accepted');
+  if (view === 'accepted') combined = combined.filter(item => item._review_status === 'accepted');
   const showManagementComments = view === 'accepted';
 
-  const rows = combined.map(item => `<tr data-apartment-id="${html(item.apartment_id)}" data-district="${html(item.district || 'Other')}" class="apartment-row ${item._review_status === 'accepted' ? 'review-accepted' : ''}">
-    <td><span class="source ${item.source === 'SS.ge' ? 'ss' : ''}">${html(item.source)}</span></td>
-    <td>${html(item.apartment_id)}</td>
-    <td>${html(item.district || 'Other')}</td>
-    <td class="apartment-address">${html(item.address || item.title || '—')}</td>
-    <td>${html(item.rooms || '—')}</td>
-    <td>${html(item.bedrooms || '—')}</td>
-    <td>${html(item.area_m2 ? `${item.area_m2} m²` : '—')}</td>
-    <td>${html(item.floor ? `${item.floor}${item.total_floors ? ` / ${item.total_floors}` : ''}` : '—')}</td>
-    <td class="price">${html(item.price || '—')}</td>
-    <td class="${item.phone ? '' : 'masked-phone'}">${html(item.phone || item._masked_phone || '—')}</td>
-    <td><a class="listing-link" href="${html(item.url)}" target="_blank" rel="noopener noreferrer">Open listing ↗</a></td>
-    ${showManagementComments ? `<td class="accepted-agent"><strong>${html(item._reviewed_by || 'Unknown agent')}</strong><small>${item._reviewed_at ? html(item._reviewed_at) : ''}</small></td><td class="management-comment"><strong>${html(item._review_comment || 'No comment')}</strong></td>` : ''}
-    <td class="review-cell">
-      <div class="review-buttons">
-        ${view === 'accepted' ? '' : '<button class="review-button accept-button" type="button" title="Accept apartment" aria-label="Accept apartment">✓</button>'}
-        <button class="review-button reject-button" type="button" title="Reject apartment" aria-label="Reject apartment">×</button>
-      </div>
-    </td>
-  </tr>
-  ${view === 'accepted' ? '' : `<tr class="comment-row" data-apartment-id="${html(item.apartment_id)}" data-comment-for="${html(item.apartment_id)}" data-district="${html(item.district || 'Other')}" hidden>
-    <td colspan="12">
-      <div class="comment-dropdown">
-        <label class="review-comment-label">Comment required before Ready For Upload
-          <textarea class="review-comment" rows="3" placeholder="Type a comment…"></textarea>
-        </label>
-        <button class="save-comment" type="button">Save &amp; move to Ready For Upload</button>
-      </div>
-    </td>
-  </tr>`}`).join('\n');
+  const rows = combined.map(item => {
+    const websiteStatus = item._api_uploaded
+      ? `<span class="website-upload uploaded">Uploaded${item._website_api_apartment_id ? ` #${html(item._website_api_apartment_id)}` : ''}</span>`
+      : item._api_error
+        ? `<span class="website-upload error" title="${html(item._api_error)}">Retrying</span>`
+        : '<span class="website-upload pending">Pending</span>';
+    return `<tr data-apartment-id="${html(item.apartment_id)}" data-district="${html(item.district || 'Other')}" class="apartment-row ${item._review_status === 'accepted' ? 'review-accepted' : ''}">
+      <td><span class="source ${item.source === 'SS.ge' ? 'ss' : ''}">${html(item.source)}</span></td>
+      <td>${html(item.apartment_id)}</td>
+      <td>${html(item.district || 'Other')}</td>
+      <td>${html(item.rooms || '—')}</td>
+      <td>${html(item.bedrooms || '—')}</td>
+      <td>${html(item.area_m2 ? `${item.area_m2} m²` : '—')}</td>
+      <td>${html(item.floor ? `${item.floor}${item.total_floors ? ` / ${item.total_floors}` : ''}` : '—')}</td>
+      <td class="price">${html(item.price || '—')}</td>
+      <td class="${item.phone ? '' : 'masked-phone'}">${html(item.phone || item._masked_phone || '—')}</td>
+      <td><a class="listing-link" href="${html(item.url)}" target="_blank" rel="noopener noreferrer">Open listing ↗</a></td>
+      <td>${websiteStatus}</td>
+      ${showManagementComments ? `<td class="accepted-agent"><strong>${html(item._reviewed_by || 'Unknown agent')}</strong><small>${item._reviewed_at ? html(item._reviewed_at) : ''}</small></td><td class="management-comment"><strong>${html(item._review_comment || '—')}</strong></td>` : ''}
+      <td class="review-cell">
+        <div class="review-buttons">
+          ${view === 'accepted' ? '' : `<button class="review-button accept-button${item._review_status === 'accepted' ? ' selected' : ''}" type="button" title="${item._review_status === 'accepted' ? 'Accepted' : 'Accept apartment'}" aria-label="Accept apartment" aria-pressed="${item._review_status === 'accepted' ? 'true' : 'false'}">✓</button>`}
+          <button class="review-button reject-button" type="button" title="Reject apartment" aria-label="Reject apartment">×</button>
+        </div>
+      </td>
+    </tr>`;
+  }).join('\n');
 
   if (!fs.existsSync(DASHBOARD_TEMPLATE_PATH)) {
     throw new Error(`Dashboard template is missing: ${DASHBOARD_TEMPLATE_PATH}`);
   }
   const content = view === 'owners' ? buildOwnersContent(viewer) : combined.length
-    ? `<table><thead><tr><th>Source</th><th>ID</th><th>District</th><th>Address</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th>${showManagementComments ? '<th>Accepted by</th><th>Comment</th>' : ''}<th>Review</th></tr></thead><tbody>${rows}</tbody></table>`
+    ? `<table><thead><tr><th>Source</th><th>ID</th><th>District</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th><th>Website</th>${showManagementComments ? '<th>Accepted by</th><th>Comment</th>' : ''}<th>Review</th></tr></thead><tbody>${rows}</tbody></table>`
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
     .replace('{{LISTING_COUNT}}', String(view === 'owners' ? ownersData(viewer).rows.length : combined.length))
@@ -502,7 +508,9 @@ function readRequestJson(request) {
 
 function publicWatcherConfig(viewer = { role: 'admin' }) {
   const apiEnabled = Boolean(process.env.WEBSITE_API_EMAIL && process.env.WEBSITE_API_PASSWORD);
-  const savedApartments = viewer.role === 'admin' ? Object.values(readJsonFile(DATA_PATH)) : [];
+  const savedApartments = viewer.role === 'admin'
+    ? [...Object.values(readJsonFile(DATA_PATH)), ...Object.values(readJsonFile(SS_DATA_PATH))]
+    : [];
   const pendingAssignments = viewer.role === 'admin'
     ? savedApartments.filter(item => !item._baseline && !item._excluded && !item._api_uploaded).length
     : 0;
@@ -583,7 +591,6 @@ async function reviewApartment(request, response, viewer, apartmentId) {
     const body = await readRequestJson(request);
     if (!['accepted', 'rejected', 'manager-selection'].includes(body.action)) throw new Error('Invalid review action');
     const comment = clean(body.comment || '').slice(0, 2000);
-    if (body.action === 'accepted' && !comment) throw new Error('A comment is required before moving an apartment to Ready For Upload');
     const myHomeData = liveMyHomeData || loadData();
     const ssData = liveSsData || loadSsData();
     const data = myHomeData[apartmentId] ? myHomeData : ssData;
@@ -1497,63 +1504,34 @@ function integer(value, minimum = 0) {
 async function websiteApiHasApartment(item) {
   const query = new URLSearchParams({ search: item.apartment_id, pageSize: '50' });
   const payload = await websiteApiRequest(`/api/Apartments?${query}`);
-  return responseItems(payload).find(apartment =>
-    String(apartment.description || '').includes(item.url) || String(apartment.description || '').includes(`MyHome ID: ${item.apartment_id}`)
-  ) || null;
+  const sourceLabel = item.source === 'SS.ge' ? 'SS.ge' : 'MyHome';
+  return responseItems(payload).find(apartment => {
+    const description = String(apartment.description || '');
+    return description.includes(item.url) ||
+      description.includes(`${sourceLabel} ID: ${item.apartment_id}`) ||
+      description.includes(`Source ID: ${item.apartment_id}`) ||
+      String(apartment.sourceListingId || '') === String(item.apartment_id);
+  }) || null;
 }
 
-function canonicalStreet(payload) {
-  if (Array.isArray(payload)) {
-    for (const item of payload) {
-      const resolved = canonicalStreet(item);
-      if (resolved) return resolved;
-    }
-  }
-  const candidates = [payload, payload?.data, payload?.street, payload?.result, payload?.data?.street].filter(Boolean);
-  for (const value of candidates) {
-    const id = value.streetId ?? value.street_id ?? value.id;
-    if (id != null) return { id: String(id), name: clean(value.street || value.streetName || value.name || value.title) };
-  }
-  return null;
-}
-
-async function resolveWebsiteStreet(address) {
-  const original = clean(address);
-  if (!original) throw new Error('Apartment address is empty; canonical StreetId cannot be resolved');
-  if (streetResolutionCache.has(original)) return streetResolutionCache.get(original);
-  const withoutBuilding = clean(original
-    .replace(/(?:\s|,)+(?:N|№|#)?\s*\d+[\w/-]*\s*$/iu, '')
-    .replace(/(?:\s|,)+(?:კორპუსი|კორპ\.?|ბინა)\s*\d+.*$/iu, ''));
-  const attempts = [...new Set([original, withoutBuilding].filter(Boolean))];
-  for (const street of attempts) {
-    const query = new URLSearchParams({ street });
-    try {
-      const resolved = canonicalStreet(await websiteApiRequest(`/api/Locations/resolve-street?${query}`));
-      if (resolved) {
-        streetResolutionCache.set(original, resolved);
-        return resolved;
-      }
-    } catch (error) {
-      if (!/HTTP (?:400|404)/.test(error.message)) throw error;
-    }
-  }
-  throw new Error(`Canonical StreetId was not found for address: ${original}`);
+function websiteApartmentFromResponse(payload) {
+  if (!payload || typeof payload !== 'object') return null;
+  return payload.apartment || payload.data?.apartment || payload.data || payload.result || payload;
 }
 
 async function uploadApartmentToWebsite(item) {
   const existing = await websiteApiHasApartment(item);
   if (existing) return { existing: true, apartment: existing };
-  const street = await resolveWebsiteStreet(item.address);
+
+  const sourceLabel = item.source === 'SS.ge' ? 'SS.ge' : 'MyHome';
   const form = new FormData();
-  form.set('Title', item.title || `Apartment ${item.apartment_id}`);
-  form.set('Description', `${item.description || ''}\n\nSource: ${item.url}\nMyHome ID: ${item.apartment_id}`.trim());
+  form.set('Title', item.title || `${sourceLabel} apartment ${item.apartment_id}`);
+  form.set('Description', `${item.description || ''}\n\nSource: ${item.url}\n${sourceLabel} ID: ${item.apartment_id}\nSource ID: ${item.apartment_id}`.trim());
   form.set('City', 'Tbilisi');
   form.set('Region', 'Tbilisi');
   form.set('District', item.district || 'Other');
-  if (item.address) form.set('Address', item.address);
-  form.set('StreetId', street.id);
-  if (street.name) form.set('Street', street.name);
   if (item.phone) form.set('PhoneNumber', item.phone);
+
   const price = positiveNumber(item.price);
   const size = positiveNumber(item.area_m2);
   const bedrooms = integer(item.bedrooms);
@@ -1564,37 +1542,43 @@ async function uploadApartmentToWebsite(item) {
   if (bedrooms != null) form.set('Bedrooms', String(bedrooms));
   if (floor != null) form.set('Floor', String(floor));
   if (totalFloors != null) form.set('TotalFloors', String(totalFloors));
+
+  // Streets are intentionally NOT resolved or submitted. The website apartment
+  // is created directly in the normal Apartments collection using the scraped
+  // apartment data above.
   return websiteApiRequest('/api/Apartments', { method: 'POST', body: form });
 }
 
-async function syncPendingWebsiteApartments(data, state, onlyApartmentId = null) {
+async function syncPendingWebsiteApartments(data, state, onlyApartmentId = null, dataPath = DATA_PATH, csvPath = CSV_PATH) {
   if (!process.env.WEBSITE_API_EMAIL || !process.env.WEBSITE_API_PASSWORD) return 0;
   const pending = Object.values(data)
     .filter(item => !item._baseline && !item._excluded && !item._api_uploaded &&
       (onlyApartmentId == null || String(item.apartment_id) === String(onlyApartmentId)))
     .sort((a, b) => String(a.first_seen).localeCompare(String(b.first_seen)));
   if (!pending.length) return 0;
+
   let uploaded = 0;
   for (let pendingIndex = 0; pendingIndex < pending.length; pendingIndex += 1) {
     const item = pending[pendingIndex];
-    if (watcherRuntime && !watcherRuntime.enabled) break;
+    const sourceLabel = item.source === 'SS.ge' ? 'SS.ge' : 'MyHome';
     watcherStatus.state = 'uploading';
-    watcherStatus.message = `Uploading apartment ${pendingIndex + 1} of ${pending.length}…`;
+    watcherStatus.message = `Uploading ${sourceLabel} apartment ${pendingIndex + 1} of ${pending.length} to website…`;
     try {
       const uploadedResult = await uploadApartmentToWebsite(item);
-      const websiteApartment = uploadedResult?.apartment || uploadedResult?.data?.apartment;
-      if (websiteApartment?.id != null) item._website_api_apartment_id = Number(websiteApartment.id);
+      const websiteApartment = websiteApartmentFromResponse(uploadedResult?.apartment || uploadedResult);
+      const websiteId = Number(websiteApartment?.id ?? websiteApartment?.apartmentId ?? websiteApartment?.apartment_id);
+      if (Number.isInteger(websiteId) && websiteId > 0) item._website_api_apartment_id = websiteId;
       item._api_uploaded = true;
       item._api_uploaded_at = new Date().toISOString();
       delete item._api_error;
-      saveData(data);
+      saveData(data, dataPath, csvPath);
       saveState(state);
       uploaded += 1;
-      console.log(`Uploaded MyHome ID ${item.apartment_id} to Website API.`);
+      console.log(`Uploaded ${sourceLabel} ID ${item.apartment_id} to Website API${item._website_api_apartment_id ? ` as apartment ${item._website_api_apartment_id}` : ''}.`);
     } catch (error) {
       item._api_error = error.message;
-      saveData(data);
-      console.error(`Website API upload failed for MyHome ID ${item.apartment_id}: ${error.message}`);
+      saveData(data, dataPath, csvPath);
+      console.error(`Website API upload failed for ${sourceLabel} ID ${item.apartment_id}: ${error.message}`);
     }
   }
   return uploaded;
@@ -1811,6 +1795,11 @@ async function scanSs(context, data, state) {
         saveData(data, SS_DATA_PATH, SS_CSV_PATH);
         notify(item);
         saved += 1;
+        try {
+          await syncPendingWebsiteApartments(data, state, item.apartment_id, SS_DATA_PATH, SS_CSV_PATH);
+        } catch (error) {
+          console.error(`Immediate Website API upload failed for SS.ge ID ${item.apartment_id}: ${error.message}`);
+        }
         await sleep(1500);
       } catch (error) {
         console.error(`Could not read SS.ge ID ${card.id}: ${error.message}`);
@@ -1818,6 +1807,11 @@ async function scanSs(context, data, state) {
     }
   } finally {
     await detailPage.close();
+  }
+  try {
+    await syncPendingWebsiteApartments(data, state, null, SS_DATA_PATH, SS_CSV_PATH);
+  } catch (error) {
+    console.error(`Website API synchronization failed for SS.ge: ${error.message}`);
   }
   return saved;
 }
@@ -1837,8 +1831,10 @@ async function main() {
   const state = loadState();
   const excludedMyHome = markExcludedDescriptions(data);
   const excludedSs = markExcludedDescriptions(ssData);
+  const clearedStreetErrors = clearLegacyStreetUploadErrors(data) + clearLegacyStreetUploadErrors(ssData);
   saveData(data);
   saveData(ssData, SS_DATA_PATH, SS_CSV_PATH);
+  if (clearedStreetErrors) console.log(`Cleared ${clearedStreetErrors} obsolete street-resolution upload error(s); those apartments will retry without streets.`);
   if (excludedMyHome + excludedSs) {
     console.log(`Filtered ${excludedMyHome + excludedSs} existing listing(s) by description.`);
   }

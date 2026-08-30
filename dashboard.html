@@ -30,7 +30,7 @@
 
     <nav class="management-nav" id="management-nav" data-current-view="{{CURRENT_VIEW}}" hidden aria-label="Management views">
       <a href="/" data-view="all">All apartments</a>
-      <a href="/?view=accepted" data-view="accepted">✓ Ready For Upload</a>
+      <a href="/?view=accepted" data-view="accepted">✓ Accepted apartments</a>
       <a href="/?view=owners" data-view="owners">Owners</a>
       <button id="copy-accepted-links" type="button" data-management-only>Copy accepted links</button>
     </nav>
@@ -390,26 +390,15 @@
           return;
         }
         if (event.target.closest('.accept-button')) {
+          const button = event.target.closest('.accept-button');
+          if (button.classList.contains('selected')) return;
           row.classList.add('review-accepting');
-          document.querySelectorAll('tr.comment-row').forEach(item => {
-            if (item !== commentRow) item.hidden = true;
-          });
-          if (commentRow) {
-            commentRow.hidden = !commentRow.hidden;
-            if (!commentRow.hidden) commentRow.querySelector('.review-comment').focus();
-          }
+          await saveReview(row, 'accepted', '');
+          button.classList.add('selected');
+          button.setAttribute('aria-pressed', 'true');
+          button.title = 'Accepted';
+          row.classList.add('review-accepted');
           setTimeout(() => row.classList.remove('review-accepting'), 650);
-          return;
-        }
-        if (event.target.closest('.save-comment')) {
-          const comment = commentRow?.querySelector('.review-comment').value.trim() || '';
-          if (!comment) {
-            commentRow?.querySelector('.review-comment').focus();
-            alert('Please type a comment before moving this apartment to Ready For Upload.');
-            return;
-          }
-          await saveReview(row, 'accepted', comment);
-          location.href = '/?view=accepted';
           return;
         }
       } catch (error) {

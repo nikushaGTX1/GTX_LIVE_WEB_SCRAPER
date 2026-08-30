@@ -40,8 +40,7 @@ the next Start, and the admin panel shows their count plus API credential status
 Local agent ownership is committed before the Website API upload, in persistent
 round-robin order. A street-catalog or network error therefore does not leave the
 dashboard owner as `Pending`; the same agent is retained while the API upload
-retries. Before creating the API apartment, its address is resolved through
-`/api/Locations/resolve-street` and the required canonical `StreetId` is submitted.
+retries. Street resolution is intentionally not used. New scraped apartments are sent directly to `/api/Apartments`; street IDs are not required by this watcher.
 
 Agents can review their assigned rows with a green checkmark or red ×. Rejecting
 plays a red removal animation and persistently hides the apartment. Accepting
@@ -55,9 +54,7 @@ District filtering never opens comment rows, and the results table wraps long ID
 and addresses instead of forcing a horizontal scrollbar.
 
 Admins and managers have an `Accepted apartments` management view at
-`/?view=accepted`. Saving an agent's ✓ comment immediately places the apartment
-in that queue and removes it from the agent's active list. Clicking ✓ only opens
-the editor; the handoff occurs when `Save comment` succeeds. The queue includes accepted apartments across every agent plus the saved
+`/?view=accepted`. Clicking ✓ immediately marks the apartment accepted. The Accepted apartments view is a strict accepted-only subset, while All apartments continues to show every non-rejected scraped apartment. The queue includes accepted apartments across every agent plus the saved
 comment, reviewer email, and review time. Managers are restricted to this accepted
 queue; admins can switch between all and accepted views.
 The management navigation includes `Copy accepted links`, which copies every
@@ -201,3 +198,14 @@ The dashboard is at `/`, with CSV downloads at `/apartments.csv` and
 `/ss-apartments.csv`. The first hosted start creates a fresh silent baseline unless
 you copy the local JSON data into the Railway volume.
 "# GTX_LIVE_WEB_SCRAPER" 
+
+
+## Dashboard/API behavior update
+
+- The dashboard apartment table no longer shows street/address data.
+- `All apartments` contains every non-rejected scraped apartment, including accepted ones.
+- `Accepted apartments` contains only rows marked accepted with ✓.
+- Every newly scraped MyHome apartment is sent immediately to the Website API.
+- When SS.ge scraping is enabled, newly scraped SS.ge apartments are also sent immediately to the Website API.
+- Website uploads do not resolve or require StreetId.
+- The dashboard Website column shows Uploaded, Pending, or Retrying so API synchronization is visible.

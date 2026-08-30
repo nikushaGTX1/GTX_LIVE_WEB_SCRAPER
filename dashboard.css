@@ -436,3 +436,10 @@ a:hover { text-decoration: underline; }
   #watcher-form { grid-template-columns: 1fr 1fr; }
   #watcher-form .url-field { grid-column: 1 / -1; }
 }
+
+
+/* Website API upload state */
+.website-upload { display:inline-flex; align-items:center; padding:5px 8px; border-radius:999px; font-size:11px; font-weight:800; white-space:nowrap; }
+.website-upload.uploaded { background:#e5f7ed; color:#087443; }
+.website-upload.pending { background:#edf3fa; color:#40516a; }
+.website-upload.error { background:#fff0e4; color:#a84a00; }
