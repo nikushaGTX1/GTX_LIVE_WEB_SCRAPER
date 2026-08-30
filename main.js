@@ -30,6 +30,7 @@ const FAVICON_PATH = path.join(ROOT, 'favicon.svg');
 const STATE_PATH = path.join(DATA_ROOT, 'watcher-state.json');
 const WATCHER_CONFIG_PATH = path.join(DATA_ROOT, 'watcher-config.json');
 const OWNERS_PATH = path.join(DATA_ROOT, 'owners.json');
+const ADMIN_OWNERS_PATH = path.join(DATA_ROOT, 'owners-admin.json');
 const PROFILE_PATH = process.env.WATCHER_PROFILE || path.join(DATA_ROOT, '.browser-profile');
 const IS_HOSTED = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID);
 const SS_SCRAPER_ENABLED = String(process.env.ENABLE_SS_SCRAPER || '').toLowerCase() === 'true';
@@ -234,15 +235,11 @@ function ownerAccountKey(viewer) {
 }
 
 function ownersPathFor(viewer) {
+  if (viewer?.role === 'admin') return ADMIN_OWNERS_PATH;
   return path.join(DATA_ROOT, `owners-${ownerAccountKey(viewer)}.json`);
 }
 
-function ownersData(viewer) {
-  const accountPath = ownersPathFor(viewer);
-  // Give the first authenticated account the old shared database, then remove
-  // the shared copy so it can never be exposed to another account.
-  if (!fs.existsSync(accountPath) && fs.existsSync(OWNERS_PATH)) fs.renameSync(OWNERS_PATH, accountPath);
-  const saved = readJsonFile(accountPath);
+function normalizedOwnersData(saved) {
   if (!Array.isArray(saved.rows)) return { headers: OWNER_HEADERS, rows: [] };
   const savedHeaders = Array.isArray(saved.headers) ? saved.headers.map(clean) : [];
   const rows = saved.rows.map(row => OWNER_HEADERS.map((header, columnIndex) => {
@@ -251,6 +248,39 @@ function ownersData(viewer) {
     return clean(Array.isArray(row) ? row[sourceIndex] : '');
   }));
   return { headers: OWNER_HEADERS, rows };
+}
+
+function mergeOwnerRows(targetRows, sourceRows) {
+  const merged = targetRows.map(row => [...row]);
+  const indexes = new Map(merged.map((row, index) => [clean(row[0]), index]).filter(([ownerId]) => ownerId));
+  for (const source of sourceRows) {
+    const incoming = OWNER_HEADERS.map((_, index) => clean(source[index]));
+    const ownerId = incoming[0];
+    if (!ownerId) continue;
+    const existingIndex = indexes.get(ownerId);
+    if (existingIndex == null) {
+      indexes.set(ownerId, merged.length);
+      merged.push(incoming);
+    } else {
+      merged[existingIndex] = OWNER_HEADERS.map((_, columnIndex) => incoming[columnIndex] || merged[existingIndex][columnIndex]);
+    }
+  }
+  return merged;
+}
+
+function ownersData(viewer) {
+  const accountPath = ownersPathFor(viewer);
+  if (viewer?.role === 'admin' && !fs.existsSync(accountPath)) {
+    let rows = [];
+    const legacyPaths = fs.readdirSync(DATA_ROOT)
+      .filter(name => /^owners-[a-f0-9]{24}\.json$/i.test(name))
+      .map(name => path.join(DATA_ROOT, name));
+    if (fs.existsSync(OWNERS_PATH)) legacyPaths.unshift(OWNERS_PATH);
+    for (const legacyPath of legacyPaths) rows = mergeOwnerRows(rows, normalizedOwnersData(readJsonFile(legacyPath)).rows);
+    fs.writeFileSync(accountPath, JSON.stringify({ headers: OWNER_HEADERS, rows }, null, 2), 'utf8');
+    return { headers: OWNER_HEADERS, rows };
+  }
+  return normalizedOwnersData(readJsonFile(accountPath));
 }
 
 function buildOwnersContent(viewer) {
@@ -640,7 +670,8 @@ function startWebServer() {
         if (!Array.isArray(body.row)) throw new Error('Owner row is required');
         const incoming = OWNER_HEADERS.map((_, index) => clean(body.row[index]).slice(0, 4000));
         if (!incoming[0]) throw new Error('Owner ID is required');
-        const data = ownersData(viewer);
+        const adminViewer = { role: 'admin', email: 'owners-inbox' };
+        const data = ownersData(adminViewer);
         let rowIndex = data.rows.findIndex(row => clean(row[0]) === incoming[0]);
         const created = rowIndex < 0;
         if (created) {
@@ -649,7 +680,7 @@ function startWebServer() {
         } else {
           data.rows[rowIndex] = OWNER_HEADERS.map((_, columnIndex) => incoming[columnIndex] || clean(data.rows[rowIndex][columnIndex]));
         }
-        fs.writeFileSync(ownersPathFor(viewer), JSON.stringify(data, null, 2), 'utf8');
+        fs.writeFileSync(ownersPathFor(adminViewer), JSON.stringify(data, null, 2), 'utf8');
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify({ ok: true, created, rowIndex, rowCount: data.rows.length }));
       } catch (error) {
