@@ -371,6 +371,7 @@ a:hover { text-decoration: underline; }
 .accepted-agent small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
 .apartment-address { min-width: 240px; max-width: 420px; white-space: normal; }
 .price { font-weight: 700; }
+.masked-phone { color: #9a6700; font-weight: 700; }
 
 .source {
   display: inline-block;

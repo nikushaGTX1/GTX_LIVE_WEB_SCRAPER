@@ -239,6 +239,16 @@ function ownersPathFor(viewer) {
   return path.join(DATA_ROOT, `owners-${ownerAccountKey(viewer)}.json`);
 }
 
+function myHomePhoneInfo(source = {}) {
+  const values = [source.user_phone_number, source.additional_phone_number, source.comment];
+  for (const value of values) {
+    const phone = normalizeContactPhone(value);
+    if (phone) return { phone, masked: '' };
+  }
+  const masked = values.map(clean).find(value => /5\d{5}[\s-]*\*{3}/.test(value)) || '';
+  return { phone: '', masked };
+}
+
 function normalizedOwnersData(saved) {
   if (!Array.isArray(saved.rows)) return { headers: OWNER_HEADERS, rows: [] };
   const savedHeaders = Array.isArray(saved.headers) ? saved.headers.map(clean) : [];
@@ -323,7 +333,7 @@ function buildDashboard(viewer = null, view = 'all') {
     <td>${html(item.area_m2 ? `${item.area_m2} m²` : '—')}</td>
     <td>${html(item.floor ? `${item.floor}${item.total_floors ? ` / ${item.total_floors}` : ''}` : '—')}</td>
     <td class="price">${html(item.price || '—')}</td>
-    <td>${html(item.phone || '—')}</td>
+    <td class="${item.phone ? '' : 'masked-phone'}">${html(item.phone || item._masked_phone || '—')}</td>
     <td><a class="listing-link" href="${html(item.url)}" target="_blank" rel="noopener noreferrer">Open listing ↗</a></td>
     ${showManagementComments ? `<td class="accepted-agent"><strong>${html(item._reviewed_by || 'Unknown agent')}</strong><small>${item._reviewed_at ? html(item._reviewed_at) : ''}</small></td><td class="management-comment"><strong>${html(item._review_comment || 'No comment')}</strong></td>` : ''}
     <td class="review-cell">
@@ -977,12 +987,14 @@ function myHomeUrl(source, id) {
 
 function myHomeApartment(source, id, phone, firstSeen = new Date().toISOString(), district = '') {
   const gel = source.price?.['1']?.price_total;
+  const phoneInfo = myHomePhoneInfo(source);
   return {
     apartment_id: id,
     district,
     source: 'MyHome',
     title: clean(source.dynamic_title),
-    phone,
+    phone: phone || phoneInfo.phone,
+    _masked_phone: phone || phoneInfo.phone ? '' : phoneInfo.masked,
     price: gel == null ? '' : `${Number(gel).toLocaleString('en-US')}₾`,
     rooms: clean(source.room ?? source.room_type_id),
     bedrooms: clean(source.bedroom ?? source.bedroom_type_id),
@@ -1144,6 +1156,16 @@ async function extractPhone(page) {
   let phone = await visiblePhone(page);
   if (phone) return phone;
 
+  let responsePhone = '';
+  const capturePhone = async response => {
+    if (responsePhone || !/myhome\.ge|tnet\.ge/i.test(response.url())) return;
+    try {
+      const contentType = response.headers()['content-type'] || '';
+      if (!/json|text/i.test(contentType)) return;
+      responsePhone = normalizeContactPhone(await response.text());
+    } catch { /* The response body may no longer be available. */ }
+  };
+  page.on('response', capturePhone);
   const candidates = page.locator('button, a');
   const count = await candidates.count();
   for (let i = 0; i < count; i += 1) {
@@ -1152,14 +1174,69 @@ async function extractPhone(page) {
       const label = clean(await element.innerText({ timeout: 750 }));
       if (label && REVEAL_RE.test(label) && await element.isVisible()) {
         await element.click({ timeout: 3000 });
-        await page.waitForTimeout(1200);
+        for (let attempt = 0; attempt < 6 && !responsePhone; attempt += 1) {
+          await page.waitForTimeout(500);
+          const visible = await visiblePhone(page);
+          if (visible) {
+            page.off('response', capturePhone);
+            return visible;
+          }
+        }
         break;
       }
     } catch { /* Try the next matching control. */ }
   }
+  page.off('response', capturePhone);
+  if (responsePhone) return responsePhone;
   phone = await visiblePhone(page);
   if (phone) return phone;
   return normalizePhone(clean(await page.locator('body').innerText()));
+}
+
+async function repairMissingMyHomePhones(context, cards, data) {
+  const retryAfterMs = 10 * 60 * 1000;
+  const now = Date.now();
+  const pending = cards.filter(card => {
+    const saved = data[card.id];
+    const lastAttempt = new Date(saved?._phone_last_attempt_at || 0).getTime();
+    return saved && !saved._baseline && !saved._excluded && !saved.phone && now - lastAttempt >= retryAfterMs;
+  }).slice(0, 5);
+  if (!pending.length) return 0;
+
+  let repaired = 0;
+  let repairPage = null;
+  try {
+    if (!IS_HOSTED) repairPage = await context.newPage();
+    for (const card of pending) {
+      const saved = data[card.id];
+      saved._phone_last_attempt_at = new Date().toISOString();
+      saved._phone_attempts = Number(saved._phone_attempts || 0) + 1;
+      try {
+        const detail = await getMyHomeStatement(card.id);
+        const phoneInfo = myHomePhoneInfo(detail);
+        saved._masked_phone = phoneInfo.masked || saved._masked_phone || '';
+        let phone = phoneInfo.phone;
+        if (!phone && repairPage) {
+          await repairPage.goto(myHomeUrl(detail, card.id), { waitUntil: 'domcontentloaded', timeout: 90000 });
+          await waitThroughChallenge(repairPage);
+          phone = await extractPhone(repairPage);
+        }
+        if (phone) {
+          saved.phone = phone;
+          saved._masked_phone = '';
+          saved._phone_repaired_at = new Date().toISOString();
+          repaired += 1;
+          console.log(`REPAIRED MyHome phone for ID ${card.id}: ${phone}`);
+        }
+      } catch (error) {
+        console.error(`Could not repair MyHome phone for ID ${card.id}: ${error.message}`);
+      }
+    }
+  } finally {
+    if (repairPage) await repairPage.close();
+    saveData(data);
+  }
+  return repaired;
 }
 
 async function meta(page, selector) {
@@ -1171,7 +1248,7 @@ async function extractDetail(page, card) {
     const detail = await getMyHomeStatement(card.id);
     const source = { ...card.api, ...detail };
     const correctUrl = myHomeUrl(source, card.id);
-    let phone = normalizePhone(source.comment || '');
+    let phone = myHomePhoneInfo(source).phone;
     if (!phone) {
       if (IS_HOSTED) {
         // MyHome presents an interactive Cloudflare challenge to Railway's
@@ -1599,6 +1676,7 @@ async function scan(context, data, state, options) {
       console.error(`Could not repair MyHome ID ${card.id}: ${error.message}`);
     }
   }
+  await repairMissingMyHomePhones(context, cards, data);
   try {
     await syncPendingWebsiteApartments(data, state);
   } catch (error) {
