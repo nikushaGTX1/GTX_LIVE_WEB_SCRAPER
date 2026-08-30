@@ -369,7 +369,8 @@ function decodeJwt(token) {
 
 function dashboardIdentity(payload, profile, email, token) {
   const claims = decodeJwt(token);
-  const user = profile?.data || profile?.user || profile || payload?.user || payload?.data?.user || {};
+  const user = profile?.data?.user || profile?.user || profile?.data || profile || payload?.user || payload?.data?.user || {};
+  const claimEmail = claims.email || claims.unique_name || claims['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress'] || '';
   const roleValue = user.role || user.crmRole || payload?.role || payload?.data?.role || claims.role || claims['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] || '';
   const roles = Array.isArray(roleValue) ? roleValue : [roleValue];
   const adminEmails = String(process.env.DASHBOARD_ADMIN_EMAILS || '').split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
@@ -377,7 +378,7 @@ function dashboardIdentity(payload, profile, email, token) {
     ? 'admin' : roles.some(value => /manager/i.test(String(value))) ? 'manager' : 'agent';
   const agentId = String(user.userId || user.user_id || claims.sub || claims.nameid || claims['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier'] || user.id || '');
   return {
-    email: clean(user.email || claims.email || email).toLowerCase(),
+    email: clean(user.email || claimEmail || email).toLowerCase(),
     name: clean(user.fullName || user.name || user.displayName || claims.name || email),
     role,
     agentId
@@ -402,11 +403,31 @@ async function authenticateViaWebsiteApi(email, password, cacheKey) {
   return account;
 }
 
+async function authenticateBearerViaWebsiteApi(token) {
+  const cacheKey = crypto.createHash('sha256').update(`bearer:${token}`).digest('hex');
+  const cached = dashboardApiSessions.get(cacheKey);
+  if (cached && cached.expiresAt > Date.now()) return cached.account;
+  const profileResponse = await fetch(`${WEBSITE_API_URL}/api/Profile/me`, { headers: { authorization: `Bearer ${token}` } });
+  if (!profileResponse.ok) return null;
+  const profile = await profileResponse.json().catch(() => ({}));
+  const claims = decodeJwt(token);
+  const email = clean(claims.email || claims.unique_name || claims['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress'] || claims.sub);
+  const account = dashboardIdentity({}, profile, email, token);
+  if (!account.email || (account.role === 'agent' && !account.agentId)) return null;
+  dashboardApiSessions.set(cacheKey, { account, expiresAt: Date.now() + 10 * 60 * 1000 });
+  return account;
+}
+
 async function authenticateDashboard(request, response) {
   const accounts = dashboardAccounts();
   const apiMode = String(process.env.DASHBOARD_AUTH_MODE || 'api').toLowerCase() === 'api';
   if (!apiMode && !accounts.length && !IS_HOSTED) return { email: 'local', role: 'admin', agentId: '', name: 'Local admin' };
   const supplied = request.headers.authorization || '';
+  if (apiMode && supplied.startsWith('Bearer ')) {
+    const token = supplied.slice(7).trim();
+    if (!token) return rejectDashboardLogin(response);
+    return await authenticateBearerViaWebsiteApi(token) || rejectDashboardLogin(response);
+  }
   let credentials = '';
   try { if (supplied.startsWith('Basic ')) credentials = Buffer.from(supplied.slice(6), 'base64').toString('utf8'); } catch { /* Reject below. */ }
   const separator = credentials.indexOf(':');
@@ -611,6 +632,30 @@ function startWebServer() {
     if (pathname === '/api/owners' && request.method === 'GET') {
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       response.end(JSON.stringify(ownersData(viewer)));
+      return;
+    }
+    if (pathname === '/api/owners/upsert' && request.method === 'POST') {
+      try {
+        const body = await readRequestJson(request);
+        if (!Array.isArray(body.row)) throw new Error('Owner row is required');
+        const incoming = OWNER_HEADERS.map((_, index) => clean(body.row[index]).slice(0, 4000));
+        if (!incoming[0]) throw new Error('Owner ID is required');
+        const data = ownersData(viewer);
+        let rowIndex = data.rows.findIndex(row => clean(row[0]) === incoming[0]);
+        const created = rowIndex < 0;
+        if (created) {
+          data.rows.unshift(incoming);
+          rowIndex = 0;
+        } else {
+          data.rows[rowIndex] = OWNER_HEADERS.map((_, columnIndex) => incoming[columnIndex] || clean(data.rows[rowIndex][columnIndex]));
+        }
+        fs.writeFileSync(ownersPathFor(viewer), JSON.stringify(data, null, 2), 'utf8');
+        response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ ok: true, created, rowIndex, rowCount: data.rows.length }));
+      } catch (error) {
+        response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: error.message }));
+      }
       return;
     }
     if (pathname === '/api/owners' && request.method === 'POST') {

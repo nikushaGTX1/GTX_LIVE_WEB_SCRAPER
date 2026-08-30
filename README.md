@@ -167,6 +167,14 @@ claims for identity/role, and caches only the resolved session identity for ten
 minutes. `DASHBOARD_ADMIN_EMAILS` is a comma-separated fallback for admin accounts
 if the API token does not include an admin role. Other authenticated users are
 treated as agents and filtered by their authenticated user ID.
+
+API clients may send the same Website API JWT as `Authorization: Bearer <token>`.
+`POST /api/owners/upsert` accepts `{ "row": [...] }`, identifies the private owner
+record by the first (owner ID) column, and atomically inserts it or merges its
+non-empty values. This is the endpoint used by the browser extension so MyHome
+and SS.ge publication IDs safely accumulate in one row without replacing the
+whole owner database.
+
 For recovery and backward compatibility, API mode also accepts a matching legacy
 `DASHBOARD_USER`/`DASHBOARD_PASSWORD` or `DASHBOARD_ACCOUNTS` entry if Website API
 authentication rejects those credentials.
