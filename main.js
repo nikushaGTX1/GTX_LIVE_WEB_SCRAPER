@@ -6,6 +6,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { pathToFileURL } = require('node:url');
 const { chromium } = require('playwright');
+const { hasExcludedDescription } = require('./description-filter');
 
 const DISTRICT_SEARCHES = [];
 const SEARCH_PRESETS = [
@@ -34,27 +35,6 @@ const ADMIN_OWNERS_PATH = path.join(DATA_ROOT, 'owners-admin.json');
 const PROFILE_PATH = process.env.WATCHER_PROFILE || path.join(DATA_ROOT, '.browser-profile');
 const IS_HOSTED = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID);
 const SS_SCRAPER_ENABLED = String(process.env.ENABLE_SS_SCRAPER || '').toLowerCase() === 'true';
-
-const EXCLUDED_DESCRIPTION_PHRASES = [
-  'აგენტებმა არ დამირეკოთ',
-  'agentebma ar damirekot',
-  'აგენტებმა არ დარეკოთ',
-  'agentebma ar darekot',
-  'არანაირი შემოთავაზებით',
-  'aranairi shemotavazebit',
-  'ვარ აგენტი',
-  'var agenti',
-  'მაკლერებმა არ დარეკოთ',
-  'maklerebma ar darekot',
-  'არანაირი პირობით',
-  'aranairi pirobit',
-  'თავი შეიკავეთ',
-  'tavi sheikavet',
-  'აგენტებთან არ ვთანამშრომლობ',
-  'agentebtan ar vtanamshromlob',
-  'არანაირი აგენტები',
-  'aranairi agentebi'
-];
 
 const FIELDS = [
   'apartment_id', 'district', 'assigned_agent_id', 'title', 'phone', 'price', 'rooms', 'bedrooms', 'area_m2',
@@ -90,16 +70,6 @@ const dashboardApiSessions = new Map();
 function clean(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
-
-function normalizedDescription(value) {
-  return clean(value).normalize('NFKC').toLocaleLowerCase('ka-GE');
-}
-
-function hasExcludedDescription(value) {
-  const description = normalizedDescription(value);
-  return EXCLUDED_DESCRIPTION_PHRASES.some(phrase => description.includes(phrase));
-}
-
 
 function clearLegacyStreetUploadErrors(data) {
   let changed = 0;
@@ -523,7 +493,7 @@ function publicWatcherConfig(viewer = { role: 'admin' }) {
     ? [...Object.values(readJsonFile(DATA_PATH)), ...Object.values(readJsonFile(SS_DATA_PATH))]
     : [];
   const pendingAssignments = viewer.role === 'admin'
-    ? savedApartments.filter(item => !item._baseline && !item._excluded && !item._api_uploaded).length
+    ? savedApartments.filter(item => !item._baseline && !item._excluded && !item._api_uploaded && !hasExcludedDescription(item.description)).length
     : 0;
   const assignmentError = savedApartments.find(item => item._api_error)?._api_error || null;
   return {
@@ -1554,7 +1524,7 @@ async function uploadApartmentToWebsite(item) {
 async function syncPendingWebsiteApartments(data, state, onlyApartmentId = null, dataPath = DATA_PATH, csvPath = CSV_PATH) {
   if (!process.env.WEBSITE_API_EMAIL || !process.env.WEBSITE_API_PASSWORD) return 0;
   const pending = Object.values(data)
-    .filter(item => !item._baseline && !item._excluded && !item._api_uploaded &&
+    .filter(item => !item._baseline && !item._excluded && !item._api_uploaded && !hasExcludedDescription(item.description) &&
       (onlyApartmentId == null || String(item.apartment_id) === String(onlyApartmentId)))
     .sort((a, b) => String(a.first_seen).localeCompare(String(b.first_seen)));
   if (!pending.length) return 0;
