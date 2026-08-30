@@ -379,6 +379,7 @@
       if (!clickedRow) return;
       const apartmentId = clickedRow.dataset.apartmentId;
       const row = document.querySelector(`tr.apartment-row[data-apartment-id="${apartmentId}"]`);
+      const commentRow = document.querySelector(`tr.comment-row[data-comment-for="${apartmentId}"]`);
       if (!row) return;
       reviewInteractionUntil = Date.now() + 10000;
       try {
@@ -390,7 +391,24 @@
         }
         if (event.target.closest('.accept-button')) {
           row.classList.add('review-accepting');
-          await saveReview(row, 'accepted');
+          document.querySelectorAll('tr.comment-row').forEach(item => {
+            if (item !== commentRow) item.hidden = true;
+          });
+          if (commentRow) {
+            commentRow.hidden = !commentRow.hidden;
+            if (!commentRow.hidden) commentRow.querySelector('.review-comment').focus();
+          }
+          setTimeout(() => row.classList.remove('review-accepting'), 650);
+          return;
+        }
+        if (event.target.closest('.save-comment')) {
+          const comment = commentRow?.querySelector('.review-comment').value.trim() || '';
+          if (!comment) {
+            commentRow?.querySelector('.review-comment').focus();
+            alert('Please type a comment before moving this apartment to Ready For Upload.');
+            return;
+          }
+          await saveReview(row, 'accepted', comment);
           location.href = '/?view=accepted';
           return;
         }

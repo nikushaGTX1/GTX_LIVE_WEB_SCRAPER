@@ -295,20 +295,30 @@ function buildDashboard(viewer = null, view = 'all') {
     <td class="price">${html(item.price || '—')}</td>
     <td>${html(item.phone || '—')}</td>
     <td><a class="listing-link" href="${html(item.url)}" target="_blank" rel="noopener noreferrer">Open listing ↗</a></td>
-    ${showManagementComments ? `<td class="management-comment"><strong>${html(item._review_comment || 'No comment')}</strong><small>${item._reviewed_by ? `By ${html(item._reviewed_by)}` : ''}${item._reviewed_at ? ` · ${html(item._reviewed_at)}` : ''}</small></td>` : ''}
+    ${showManagementComments ? `<td class="accepted-agent"><strong>${html(item._reviewed_by || 'Unknown agent')}</strong><small>${item._reviewed_at ? html(item._reviewed_at) : ''}</small></td><td class="management-comment"><strong>${html(item._review_comment || 'No comment')}</strong></td>` : ''}
     <td class="review-cell">
       <div class="review-buttons">
         ${view === 'accepted' ? '' : '<button class="review-button accept-button" type="button" title="Accept apartment" aria-label="Accept apartment">✓</button>'}
         <button class="review-button reject-button" type="button" title="Reject apartment" aria-label="Reject apartment">×</button>
       </div>
     </td>
-  </tr>`).join('\n');
+  </tr>
+  ${view === 'accepted' ? '' : `<tr class="comment-row" data-apartment-id="${html(item.apartment_id)}" data-comment-for="${html(item.apartment_id)}" data-district="${html(item.district || 'Other')}" hidden>
+    <td colspan="12">
+      <div class="comment-dropdown">
+        <label class="review-comment-label">Comment required before Ready For Upload
+          <textarea class="review-comment" rows="3" placeholder="Type a comment…"></textarea>
+        </label>
+        <button class="save-comment" type="button">Save &amp; move to Ready For Upload</button>
+      </div>
+    </td>
+  </tr>`}`).join('\n');
 
   if (!fs.existsSync(DASHBOARD_TEMPLATE_PATH)) {
     throw new Error(`Dashboard template is missing: ${DASHBOARD_TEMPLATE_PATH}`);
   }
   const content = view === 'owners' ? buildOwnersContent(viewer) : combined.length
-    ? `<table><thead><tr><th>Source</th><th>ID</th><th>District</th><th>Address</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th>${showManagementComments ? '<th>Comment</th>' : ''}<th>Review</th></tr></thead><tbody>${rows}</tbody></table>`
+    ? `<table><thead><tr><th>Source</th><th>ID</th><th>District</th><th>Address</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th>${showManagementComments ? '<th>Accepted by</th><th>Comment</th>' : ''}<th>Review</th></tr></thead><tbody>${rows}</tbody></table>`
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
     .replace('{{LISTING_COUNT}}', String(view === 'owners' ? ownersData(viewer).rows.length : combined.length))
@@ -512,6 +522,7 @@ async function reviewApartment(request, response, viewer, apartmentId) {
     const body = await readRequestJson(request);
     if (!['accepted', 'rejected', 'manager-selection'].includes(body.action)) throw new Error('Invalid review action');
     const comment = clean(body.comment || '').slice(0, 2000);
+    if (body.action === 'accepted' && !comment) throw new Error('A comment is required before moving an apartment to Ready For Upload');
     const myHomeData = liveMyHomeData || loadData();
     const ssData = liveSsData || loadSsData();
     const data = myHomeData[apartmentId] ? myHomeData : ssData;
@@ -538,7 +549,8 @@ async function reviewApartment(request, response, viewer, apartmentId) {
     }
     item._review_status = body.action;
     item._review_comment = comment;
-    item._reviewed_by = viewer.email;
+    item._reviewed_by = viewer.name || viewer.email;
+    item._reviewed_by_email = viewer.email;
     item._reviewed_at = new Date().toISOString();
     if (data === myHomeData) saveData(data);
     else saveData(data, SS_DATA_PATH, SS_CSV_PATH);

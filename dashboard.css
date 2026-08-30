@@ -336,6 +336,7 @@ tbody tr.review-accepted { box-shadow: inset 4px 0 #20a464; }
   border-radius: 10px;
   background: #f2fbf6;
 }
+.review-comment-label { display: grid; gap: 7px; color: #40516a; font-size: 12px; font-weight: 700; }
 
 .review-audit { color: #66758c; font-size: 11px; }
 
@@ -365,6 +366,9 @@ a:hover { text-decoration: underline; }
 .management-comment { min-width: 220px; max-width: 360px; white-space: normal; }
 .management-comment strong { display: block; font-weight: 600; white-space: pre-wrap; }
 .management-comment small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
+.accepted-agent { min-width: 170px; }
+.accepted-agent strong { display: block; }
+.accepted-agent small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
 .apartment-address { min-width: 240px; max-width: 420px; white-space: normal; }
 .price { font-weight: 700; }
 
