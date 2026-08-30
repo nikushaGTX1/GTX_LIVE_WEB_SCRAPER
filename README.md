@@ -6,7 +6,7 @@ It opens every previously unseen listing, reveals the publicly available contact
 phone, and saves:
 
 - apartment ID and URL
-- title and address
+- title
 - phone number
 - price
 - room and bedroom counts
@@ -51,7 +51,7 @@ on page load—even when a saved comment exists—and opens only when the green
 checkmark beside the red × is clicked. The server prevents agents from reviewing another
 agent's apartment; admins may review any row.
 District filtering never opens comment rows, and the results table wraps long IDs
-and addresses instead of forcing a horizontal scrollbar.
+instead of forcing a horizontal scrollbar.
 
 Admins and managers have an `Accepted apartments` management view at
 `/?view=accepted`. Clicking ✓ immediately marks the apartment accepted. The Accepted apartments view is a strict accepted-only subset, while All apartments continues to show every non-rejected scraped apartment. The queue includes accepted apartments across every agent plus the saved

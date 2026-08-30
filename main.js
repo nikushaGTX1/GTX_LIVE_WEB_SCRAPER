@@ -58,7 +58,7 @@ const EXCLUDED_DESCRIPTION_PHRASES = [
 
 const FIELDS = [
   'apartment_id', 'district', 'assigned_agent_id', 'title', 'phone', 'price', 'rooms', 'bedrooms', 'area_m2',
-  'floor', 'total_floors', 'address', 'posted', 'description', 'url', 'first_seen'
+  'floor', 'total_floors', 'posted', 'description', 'url', 'first_seen'
 ];
 // MyHome has used both /udzravi-qoneba/25764728/... and
 // /udzravi-qoneba/qiravdeba-...-25764728/ detail URL formats.
@@ -104,8 +104,19 @@ function hasExcludedDescription(value) {
 function clearLegacyStreetUploadErrors(data) {
   let changed = 0;
   for (const item of Object.values(data)) {
-    if (!item._api_uploaded && /Canonical StreetId|resolve-street|StreetId/i.test(String(item._api_error || ''))) {
+    if (!item._api_uploaded && /canonical street|resolve-street|street[_-]?id|street-name/i.test(String(item._api_error || ''))) {
       delete item._api_error;
+      changed += 1;
+    }
+  }
+  return changed;
+}
+
+function clearLegacyStreetData(data) {
+  let changed = 0;
+  for (const item of Object.values(data)) {
+    if (Object.prototype.hasOwnProperty.call(item, 'address')) {
+      delete item.address;
       changed += 1;
     }
   }
@@ -1008,7 +1019,6 @@ function myHomeApartment(source, id, phone, firstSeen = new Date().toISOString()
     area_m2: clean(source.area),
     floor: clean(source.floor),
     total_floors: clean(source.total_floors),
-    address: clean(source.address),
     posted: clean(source.created_at || source.last_updated),
     description: clean(source.comment).slice(0, 2000),
     url: myHomeUrl(source, id),
@@ -1284,17 +1294,10 @@ async function extractDetail(page, card) {
   if (!title) title = await meta(page, 'meta[property="og:title"]');
   let description = await meta(page, 'meta[property="og:description"]');
   let price = match(PRICE_RE, card.text, 0) || match(PRICE_RE, body, 0);
-  let address = '';
-
   for (const data of await getJsonLd(page)) {
     for (const node of walkJson(data)) {
       if (node.offers && !Array.isArray(node.offers) && node.offers.price) {
         price = clean(`${node.offers.price} ${node.offers.priceCurrency || ''}`);
-      }
-      if (node.address && !Array.isArray(node.address) && typeof node.address === 'object') {
-        const parts = ['streetAddress', 'addressLocality', 'addressRegion', 'addressCountry']
-          .map(key => node.address[key]).filter(Boolean);
-        address = clean(parts.join(', '));
       }
       if (!description && node.description) description = clean(node.description);
     }
@@ -1313,7 +1316,6 @@ async function extractDetail(page, card) {
     area_m2: match(AREA_RE, combined),
     floor: floor ? clean(floor[1]) : '',
     total_floors: floor ? clean(floor[2]) : '',
-    address,
     posted: match(DATE_RE, card.text, 0),
     description: description.slice(0, 2000),
     url: card.url,
@@ -1593,7 +1595,6 @@ async function extractSsDetail(page, card) {
     await page.waitForTimeout(750);
     phone = await extractPhone(page);
   }
-  const address = source.address || {};
   const rooms = match(/(\d+\+?)\s*ოთახ/i, source.title || '');
   return {
     apartment_id: card.id,
@@ -1606,7 +1607,6 @@ async function extractSsDetail(page, card) {
     area_m2: clean(source.totalArea),
     floor: clean(source.floorNumber),
     total_floors: clean(source.totalAmountOfFloor),
-    address: clean([address.streetTitle, address.streetNumber, address.subdistrictTitle].filter(Boolean).join(' ')),
     posted: clean(source.createDate),
     description: clean(source.description).slice(0, 2000),
     url: card.url,
@@ -1832,9 +1832,11 @@ async function main() {
   const excludedMyHome = markExcludedDescriptions(data);
   const excludedSs = markExcludedDescriptions(ssData);
   const clearedStreetErrors = clearLegacyStreetUploadErrors(data) + clearLegacyStreetUploadErrors(ssData);
+  const clearedStreetData = clearLegacyStreetData(data) + clearLegacyStreetData(ssData);
   saveData(data);
   saveData(ssData, SS_DATA_PATH, SS_CSV_PATH);
   if (clearedStreetErrors) console.log(`Cleared ${clearedStreetErrors} obsolete street-resolution upload error(s); those apartments will retry without streets.`);
+  if (clearedStreetData) console.log(`Removed street/address data from ${clearedStreetData} saved apartment(s).`);
   if (excludedMyHome + excludedSs) {
     console.log(`Filtered ${excludedMyHome + excludedSs} existing listing(s) by description.`);
   }
