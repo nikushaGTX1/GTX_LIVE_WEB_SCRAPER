@@ -365,6 +365,7 @@ a:hover { text-decoration: underline; }
 .management-comment { min-width: 220px; max-width: 360px; white-space: normal; }
 .management-comment strong { display: block; font-weight: 600; white-space: pre-wrap; }
 .management-comment small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
+.apartment-address { min-width: 240px; max-width: 420px; white-space: normal; }
 .price { font-weight: 700; }
 
 .source {

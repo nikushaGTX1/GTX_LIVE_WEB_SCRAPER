@@ -30,7 +30,7 @@
 
     <nav class="management-nav" id="management-nav" data-current-view="{{CURRENT_VIEW}}" hidden aria-label="Management views">
       <a href="/" data-view="all">All apartments</a>
-      <a href="/?view=accepted" data-view="accepted">✓ Accepted apartments</a>
+      <a href="/?view=accepted" data-view="accepted">✓ Ready For Upload</a>
       <a href="/?view=owners" data-view="owners">Owners</a>
       <button id="copy-accepted-links" type="button" data-management-only>Copy accepted links</button>
     </nav>
@@ -379,39 +379,20 @@
       if (!clickedRow) return;
       const apartmentId = clickedRow.dataset.apartmentId;
       const row = document.querySelector(`tr.apartment-row[data-apartment-id="${apartmentId}"]`);
-      const commentRow = document.querySelector(`tr.comment-row[data-comment-for="${apartmentId}"]`);
-      if (!row || !commentRow) return;
+      if (!row) return;
       reviewInteractionUntil = Date.now() + 10000;
       try {
         if (event.target.closest('.reject-button')) {
           if (!confirm('Reject and remove this apartment from your list?')) return;
           await saveReview(row, 'rejected');
-          location.href = '/?view=owners';
+          location.reload();
           return;
         }
         if (event.target.closest('.accept-button')) {
-          if (row.querySelector('.management-comment') && ['admin', 'manager'].includes(watcherConfig?.viewer?.role)) {
-            const button = event.target.closest('.accept-button');
-            const selected = !button.classList.contains('selected');
-            await saveReview(row, 'manager-selection', '', { selected });
-            location.href = '/?view=owners';
-            return;
-          }
           row.classList.add('review-accepting');
-          commentRow.hidden = false;
-          commentRow.querySelector('.review-comment').focus();
-          setTimeout(() => row.classList.remove('review-accepting'), 650);
+          await saveReview(row, 'accepted');
+          location.href = '/?view=accepted';
           return;
-        }
-        if (event.target.closest('.save-comment')) {
-          const comment = commentRow.querySelector('.review-comment').value.trim();
-          if (!comment) {
-            commentRow.querySelector('.review-comment').focus();
-            alert('Please add a comment before accepting this apartment.');
-            return;
-          }
-          await saveReview(row, 'accepted', comment);
-          location.href = '/?view=owners';
         }
       } catch (error) {
         alert(error.message);

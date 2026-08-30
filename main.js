@@ -210,8 +210,10 @@ function readJsonFile(filePath) {
   try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch { return {}; }
 }
 
+const OWNER_HEADERS = ['მესაკუთრის ID', 'მესაკუთრის ნომერი', 'უბანი', 'ოთახები და საძინებელი', 'კვადრატულობა', 'ფასი', 'ჩემი ID MYHOME', 'ჩემი ID SS.GE', 'კომენტარი/შეთანხმება'];
+
 const DEFAULT_OWNERS = {
-  headers: ['მესაკუთრის ID', 'მესაკუთრის ნომერი', 'უბანი', 'ოთახები და საძინებელი', 'კვადრატულობა', 'ფასი', 'ჩემი ID MYHOME', 'ჩემი ID SS.GE', 'კომენტარი/შეთანხმება'],
+  headers: OWNER_HEADERS,
   rows: [
     ['25727280', '555 911 019', 'საბურთალო', '3 ოთახი 2 საძ', '90 კვ', '750$', '25735017', '36412922', 'ინდივიდი არ არის შეთანხმებული'],
     ['25727267', '575 750 160', 'საბურთალო', '2 ოთახი 1 საძ', '56 კვ', '700$', '25735131', '36413137', 'ინდივიდი და არ არის'],
@@ -241,9 +243,14 @@ function ownersData(viewer) {
   // the shared copy so it can never be exposed to another account.
   if (!fs.existsSync(accountPath) && fs.existsSync(OWNERS_PATH)) fs.renameSync(OWNERS_PATH, accountPath);
   const saved = readJsonFile(accountPath);
-  return Array.isArray(saved.headers) && Array.isArray(saved.rows)
-    ? saved
-    : { headers: DEFAULT_OWNERS.headers, rows: [] };
+  if (!Array.isArray(saved.rows)) return { headers: OWNER_HEADERS, rows: [] };
+  const savedHeaders = Array.isArray(saved.headers) ? saved.headers.map(clean) : [];
+  const rows = saved.rows.map(row => OWNER_HEADERS.map((header, columnIndex) => {
+    const matchingIndex = savedHeaders.indexOf(header);
+    const sourceIndex = matchingIndex >= 0 ? matchingIndex : columnIndex;
+    return clean(Array.isArray(row) ? row[sourceIndex] : '');
+  }));
+  return { headers: OWNER_HEADERS, rows };
 }
 
 function buildOwnersContent(viewer) {
@@ -271,49 +278,28 @@ function buildDashboard(viewer = null, view = 'all') {
     ...Object.values(readJsonFile(SS_DATA_PATH)).map(item => ({ ...item, source: 'SS.ge' }))
   ].filter(item => !item._baseline && !item._excluded && item._review_status !== 'rejected' && !hasExcludedDescription(item.description))
     .sort((a, b) => String(b.first_seen).localeCompare(String(a.first_seen)));
-  if (viewer?.role === 'agent') {
-    combined = combined.filter(item => view === 'accepted' ? item._review_status === 'accepted' : item._review_status !== 'accepted');
-  }
-  if ((view === 'accepted' && viewer?.role !== 'agent') || viewer?.role === 'manager') {
-    combined = combined.filter(item => item._review_status === 'accepted');
-  }
-  const showManagementComments = view === 'accepted' || viewer?.role === 'manager';
-  const canManageSelection = ['admin', 'manager'].includes(viewer?.role) && showManagementComments;
-  const uploadAgents = dashboardUploadAgents;
-  const uploadCell = (item, agent) => {
-    const agentName = clean(agent.name).toLocaleLowerCase();
-    const uploads = (item._listing_uploads || []).filter(upload =>
-      String(upload.agentUserId || '') === String(agent.id) ||
-      (!upload.agentUserId && clean(upload.agentName).toLocaleLowerCase() === agentName));
-    if (!uploads.length) return '<td class="upload-ids empty-upload">—</td>';
-    return `<td class="upload-ids">${uploads.map(upload => {
-      const label = upload.platform === 'myhome' ? 'MH' : 'SS';
-      const id = html(upload.publishedListingId);
-      return upload.publishedUrl
-        ? `<a href="${html(upload.publishedUrl)}" target="_blank" rel="noopener noreferrer">${label}: ${id} ↗</a>`
-        : `<span>${label}: ${id}</span>`;
-    }).join('')}</td>`;
-  };
+  combined = combined.filter(item => view === 'accepted'
+    ? item._review_status === 'accepted'
+    : item._review_status !== 'accepted');
+  const showManagementComments = view === 'accepted';
 
   const rows = combined.map(item => `<tr data-apartment-id="${html(item.apartment_id)}" data-district="${html(item.district || 'Other')}" class="apartment-row ${item._review_status === 'accepted' ? 'review-accepted' : ''}">
     <td><span class="source ${item.source === 'SS.ge' ? 'ss' : ''}">${html(item.source)}</span></td>
+    <td>${html(item.apartment_id)}</td>
     <td>${html(item.district || 'Other')}</td>
+    <td class="apartment-address">${html(item.address || item.title || '—')}</td>
+    <td>${html(item.rooms || '—')}</td>
+    <td>${html(item.bedrooms || '—')}</td>
+    <td>${html(item.area_m2 ? `${item.area_m2} m²` : '—')}</td>
+    <td>${html(item.floor ? `${item.floor}${item.total_floors ? ` / ${item.total_floors}` : ''}` : '—')}</td>
+    <td class="price">${html(item.price || '—')}</td>
+    <td>${html(item.phone || '—')}</td>
     <td><a class="listing-link" href="${html(item.url)}" target="_blank" rel="noopener noreferrer">Open listing ↗</a></td>
     ${showManagementComments ? `<td class="management-comment"><strong>${html(item._review_comment || 'No comment')}</strong><small>${item._reviewed_by ? `By ${html(item._reviewed_by)}` : ''}${item._reviewed_at ? ` · ${html(item._reviewed_at)}` : ''}</small></td>` : ''}
-    ${uploadAgents.map(agent => uploadCell(item, agent)).join('')}
     <td class="review-cell">
       <div class="review-buttons">
-        <button class="review-button accept-button${canManageSelection && item._manager_selected ? ' selected' : ''}" type="button" title="${canManageSelection ? 'Toggle manager selection' : 'Accept and comment'}" aria-label="${canManageSelection ? 'Toggle manager selection' : 'Accept apartment'}" aria-pressed="${canManageSelection ? String(Boolean(item._manager_selected)) : 'false'}">✓</button>
+        ${view === 'accepted' ? '' : '<button class="review-button accept-button" type="button" title="Accept apartment" aria-label="Accept apartment">✓</button>'}
         <button class="review-button reject-button" type="button" title="Reject apartment" aria-label="Reject apartment">×</button>
-      </div>
-    </td>
-  </tr>
-  <tr class="comment-row" data-apartment-id="${html(item.apartment_id)}" data-comment-for="${html(item.apartment_id)}" data-district="${html(item.district || 'Other')}" hidden>
-    <td colspan="${(showManagementComments ? 5 : 4) + uploadAgents.length}">
-      <div class="comment-dropdown">
-        <textarea class="review-comment" rows="3" placeholder="Type a comment…">${html(item._review_comment || '')}</textarea>
-        <div class="review-audit">${item._reviewed_by ? `Accepted by ${html(item._reviewed_by)}${item._reviewed_at ? ` · ${html(item._reviewed_at)}` : ''}` : ''}</div>
-        <button class="save-comment" type="button">Save comment</button>
       </div>
     </td>
   </tr>`).join('\n');
@@ -322,13 +308,13 @@ function buildDashboard(viewer = null, view = 'all') {
     throw new Error(`Dashboard template is missing: ${DASHBOARD_TEMPLATE_PATH}`);
   }
   const content = view === 'owners' ? buildOwnersContent(viewer) : combined.length
-    ? `<table><thead><tr><th>Source</th><th>District</th><th>Link</th>${showManagementComments ? '<th>Comment</th>' : ''}${uploadAgents.map(agent => `<th class="agent-upload-heading">${html(agent.name)}</th>`).join('')}<th>Review</th></tr></thead><tbody>${rows}</tbody></table>`
+    ? `<table><thead><tr><th>Source</th><th>ID</th><th>District</th><th>Address</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th>${showManagementComments ? '<th>Comment</th>' : ''}<th>Review</th></tr></thead><tbody>${rows}</tbody></table>`
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
     .replace('{{LISTING_COUNT}}', String(view === 'owners' ? ownersData(viewer).rows.length : combined.length))
     .replace('{{LOGGED_IN_AS}}', html(viewer?.name || viewer?.email || process.env.DASHBOARD_DISPLAY_USER || process.env.WEBSITE_API_EMAIL || 'Local viewer'))
     .replace('{{LOGGED_IN_ROLE}}', html(viewer?.role || 'admin'))
-    .replace('{{CURRENT_VIEW}}', view === 'owners' ? 'owners' : (view === 'accepted' || viewer?.role === 'manager' ? 'accepted' : 'all'))
+    .replace('{{CURRENT_VIEW}}', view === 'owners' ? 'owners' : (view === 'accepted' ? 'accepted' : 'all'))
     .replace('{{DASHBOARD_CONTENT}}', content);
   return document;
 }
@@ -526,7 +512,6 @@ async function reviewApartment(request, response, viewer, apartmentId) {
     const body = await readRequestJson(request);
     if (!['accepted', 'rejected', 'manager-selection'].includes(body.action)) throw new Error('Invalid review action');
     const comment = clean(body.comment || '').slice(0, 2000);
-    if (body.action === 'accepted' && !comment) throw new Error('A comment is required to accept an apartment');
     const myHomeData = liveMyHomeData || loadData();
     const ssData = liveSsData || loadSsData();
     const data = myHomeData[apartmentId] ? myHomeData : ssData;
@@ -621,13 +606,16 @@ function startWebServer() {
         const body = await readRequestJson(request);
         if (!Array.isArray(body.headers) || !body.headers.length || !Array.isArray(body.rows)) throw new Error('The worksheet is empty');
         if (body.headers.length > 100 || body.rows.length > 50_000) throw new Error('The worksheet is too large');
-        const headers = body.headers.map(value => clean(value) || 'Column').slice(0, 100);
-        const importedRows = body.rows.map(row => headers.map((_, index) => clean(Array.isArray(row) ? row[index] : '')));
-        let data = { headers, rows: importedRows };
+        const importedHeaders = body.headers.map(value => clean(value) || 'Column').slice(0, 100);
+        const importedRows = body.rows.map(row => OWNER_HEADERS.map((header, columnIndex) => {
+          const matchingIndex = importedHeaders.indexOf(header);
+          const sourceIndex = matchingIndex >= 0 ? matchingIndex : columnIndex;
+          return clean(Array.isArray(row) ? row[sourceIndex] : '');
+        }));
+        let data = { headers: OWNER_HEADERS, rows: importedRows };
         if (body.append) {
           const current = ownersData(viewer);
-          if (current.headers.join('\u0000') !== headers.join('\u0000')) throw new Error('Column names must match when appending');
-          data = { headers, rows: [...importedRows, ...current.rows] };
+          data = { headers: OWNER_HEADERS, rows: [...importedRows, ...current.rows] };
         }
         fs.writeFileSync(ownersPathFor(viewer), JSON.stringify(data, null, 2), 'utf8');
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
