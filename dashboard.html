@@ -543,7 +543,15 @@
           button.textContent = 'Moving…';
           await saveReview(row, 'accepted', comment);
           row.classList.add('review-accepting');
-          setTimeout(() => { location.href = '/?view=accepted'; }, 300);
+          setTimeout(() => {
+            commentRow.remove();
+            row.remove();
+            const currentCount = Number(document.getElementById('listing-count').textContent) || 0;
+            document.getElementById('listing-count').textContent = String(Math.max(0, currentCount - 1));
+            if (!document.querySelector('tr.apartment-row')) {
+              document.getElementById('dashboard-content').innerHTML = '<div class="empty">No apartments waiting for review.</div>';
+            }
+          }, 300);
           return;
         }
       } catch (error) {
