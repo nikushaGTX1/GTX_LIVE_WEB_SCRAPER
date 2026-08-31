@@ -334,7 +334,17 @@ tbody tr.review-accepted { box-shadow: inset 4px 0 #20a464; }
 .upload-ids a:hover { text-decoration: underline; }
 .empty-upload { color: var(--muted); }
 
-.review-cell { min-width: 88px; white-space: nowrap; }
+.review-heading,
+.review-cell {
+  position: sticky;
+  left: 0;
+  min-width: 88px;
+  white-space: nowrap;
+  box-shadow: 1px 0 0 var(--line);
+}
+.review-heading { z-index: 3; }
+.review-cell { z-index: 2; background: var(--surface); }
+tbody tr:hover .review-cell { background: #f7fbff; }
 .review-buttons { display: flex; gap: 7px; }
 
 .review-button {
@@ -375,6 +385,9 @@ tbody tr.review-accepted { box-shadow: inset 4px 0 #20a464; }
 .review-comment { resize: vertical; min-height: 64px; padding: 8px; border: 1px solid #b8d8c6; border-radius: 8px; font: inherit; }
 .review-comment:focus { border-color: #20a464; outline: 3px solid rgb(32 164 100 / 12%); }
 .save-comment { justify-self: end; padding: 7px 10px; border: 0; border-radius: 7px; background: #168653; color: #fff; cursor: pointer; font-weight: 700; }
+.comment-actions { display: flex; align-items: center; gap: 7px; }
+.cancel-comment { padding: 7px 10px; border: 1px solid var(--line); border-radius: 7px; background: #fff; color: var(--muted); cursor: pointer; font-weight: 700; }
+.save-comment:disabled { cursor: wait; opacity: .7; }
 
 tr.review-accepting { animation: accept-flash 650ms ease; }
 tr.review-rejecting { animation: reject-away 450ms ease forwards; pointer-events: none; }

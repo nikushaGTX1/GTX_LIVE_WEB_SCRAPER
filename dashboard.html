@@ -408,15 +408,31 @@
           return;
         }
         if (event.target.closest('.accept-button')) {
-          const button = event.target.closest('.accept-button');
-          if (button.classList.contains('selected')) return;
+          if (!commentRow) return;
+          document.querySelectorAll('tbody tr.comment-row').forEach(candidate => {
+            if (candidate !== commentRow) candidate.hidden = true;
+          });
+          commentRow.hidden = false;
+          commentRow.querySelector('.review-comment').focus();
+          return;
+        }
+        if (event.target.closest('.cancel-comment')) {
+          commentRow.hidden = true;
+          return;
+        }
+        if (event.target.closest('.save-comment')) {
+          const comment = commentRow.querySelector('.review-comment').value.trim();
+          if (!comment) {
+            alert('Please add a comment before moving this apartment to Ready For Upload.');
+            commentRow.querySelector('.review-comment').focus();
+            return;
+          }
+          const button = event.target.closest('.save-comment');
+          button.disabled = true;
+          button.textContent = 'Moving…';
+          await saveReview(row, 'accepted', comment);
           row.classList.add('review-accepting');
-          await saveReview(row, 'accepted', '');
-          button.classList.add('selected');
-          button.setAttribute('aria-pressed', 'true');
-          button.title = 'Accepted';
-          row.classList.add('review-accepted');
-          setTimeout(() => row.classList.remove('review-accepting'), 650);
+          setTimeout(() => { location.href = '/?view=accepted'; }, 300);
           return;
         }
       } catch (error) {

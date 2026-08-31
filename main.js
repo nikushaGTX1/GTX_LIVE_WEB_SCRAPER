@@ -317,6 +317,8 @@ function buildDashboard(viewer = null, view = 'all') {
     );
   } else if (view === 'accepted' || viewer?.role === 'manager') {
     combined = combined.filter(item => item._review_status === 'accepted');
+  } else {
+    combined = combined.filter(item => item._review_status !== 'accepted');
   }
   const showManagementComments = view === 'accepted' || viewer?.role === 'manager';
 
@@ -326,7 +328,13 @@ function buildDashboard(viewer = null, view = 'all') {
       : item._api_error
         ? `<span class="website-upload error" title="${html(item._api_error)}">Retrying</span>`
         : '<span class="website-upload pending">Pending</span>';
-    return `<tr data-apartment-id="${html(item.apartment_id)}" data-district="${html(item.district || 'Other')}" class="apartment-row ${item._review_status === 'accepted' ? 'review-accepted' : ''}">
+    const apartmentRow = `<tr data-apartment-id="${html(item.apartment_id)}" data-district="${html(item.district || 'Other')}" class="apartment-row ${item._review_status === 'accepted' ? 'review-accepted' : ''}">
+      <td class="review-cell">
+        <div class="review-buttons">
+          ${view === 'accepted' ? '' : `<button class="review-button accept-button${item._review_status === 'accepted' ? ' selected' : ''}" type="button" title="${item._review_status === 'accepted' ? 'Accepted' : 'Accept apartment'}" aria-label="Accept apartment" aria-pressed="${item._review_status === 'accepted' ? 'true' : 'false'}">✓</button>`}
+          <button class="review-button reject-button" type="button" title="Reject apartment" aria-label="Reject apartment">×</button>
+        </div>
+      </td>
       <td><span class="source ${item.source === 'SS.ge' ? 'ss' : ''}">${html(item.source)}</span></td>
       <td>${html(item.apartment_id)}</td>
       <td>${html(item.district || 'Other')}</td>
@@ -340,10 +348,19 @@ function buildDashboard(viewer = null, view = 'all') {
       <td><a class="listing-link" href="${html(item.url)}" target="_blank" rel="noopener noreferrer">Open listing ↗</a></td>
       <td>${websiteStatus}</td>
       ${showManagementComments ? `<td class="accepted-agent"><strong>${html(item._reviewed_by || 'Unknown agent')}</strong><small>${item._reviewed_at ? html(item._reviewed_at) : ''}</small></td><td class="management-comment"><strong>${html(item._review_comment || '—')}</strong></td>` : ''}
-      <td class="review-cell">
-        <div class="review-buttons">
-          ${view === 'accepted' ? '' : `<button class="review-button accept-button${item._review_status === 'accepted' ? ' selected' : ''}" type="button" title="${item._review_status === 'accepted' ? 'Accepted' : 'Accept apartment'}" aria-label="Accept apartment" aria-pressed="${item._review_status === 'accepted' ? 'true' : 'false'}">✓</button>`}
-          <button class="review-button reject-button" type="button" title="Reject apartment" aria-label="Reject apartment">×</button>
+    </tr>`;
+    if (view === 'accepted') return apartmentRow;
+    const columnCount = showManagementComments ? 15 : 13;
+    return `${apartmentRow}<tr class="comment-row" data-apartment-id="${html(item.apartment_id)}" data-comment-for="${html(item.apartment_id)}" hidden>
+      <td colspan="${columnCount}">
+        <div class="comment-dropdown">
+          <label class="review-comment-label">Comment
+            <textarea class="review-comment" maxlength="2000" placeholder="Add a comment before moving this apartment to Ready For Upload" required></textarea>
+          </label>
+          <div class="comment-actions">
+            <button class="cancel-comment" type="button">Cancel</button>
+            <button class="save-comment" type="button">Save comment &amp; move</button>
+          </div>
         </div>
       </td>
     </tr>`;
@@ -353,7 +370,7 @@ function buildDashboard(viewer = null, view = 'all') {
     throw new Error(`Dashboard template is missing: ${DASHBOARD_TEMPLATE_PATH}`);
   }
   const content = view === 'owners' ? buildOwnersContent(viewer) : combined.length
-    ? `<table><thead><tr><th>Source</th><th>ID</th><th>District</th><th>Assigned agent</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th><th>Website</th>${showManagementComments ? '<th>Accepted by</th><th>Comment</th>' : ''}<th>Review</th></tr></thead><tbody>${rows}</tbody></table>`
+    ? `<table><thead><tr><th class="review-heading">Review</th><th>Source</th><th>ID</th><th>District</th><th>Assigned agent</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th><th>Website</th>${showManagementComments ? '<th>Accepted by</th><th>Comment</th>' : ''}</tr></thead><tbody>${rows}</tbody></table>`
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
     .replace('{{LISTING_COUNT}}', String(view === 'owners' ? ownersData(viewer).rows.length : combined.length))
@@ -1571,6 +1588,12 @@ async function uploadApartmentToWebsite(item, agentId) {
 }
 
 async function syncPendingWebsiteApartments(data, state, onlyApartmentId = null, dataPath = DATA_PATH, csvPath = CSV_PATH) {
+  // Scraped listings belong only to this scraper's private dataset. They must
+  // never be published into Velven's customer-facing Apartments collection.
+  return 0;
+
+  /* Legacy publishing implementation retained temporarily for data migration
+     reference. It is intentionally unreachable. */
   if (!process.env.WEBSITE_API_EMAIL || !process.env.WEBSITE_API_PASSWORD) return 0;
   const pending = Object.values(data)
     .filter(item => !item._baseline && !item._excluded && !item._api_uploaded && !hasExcludedDescription(item.description) &&

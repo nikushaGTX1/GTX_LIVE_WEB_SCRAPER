@@ -107,28 +107,9 @@ configuration as manually pasted URLs.
 
 ## Website API integration
 
-New MyHome apartments can be uploaded to the Website API and distributed in a
-stable round-robin across all configured agents. Set:
-
-```text
-WEBSITE_API_URL=https://websiteapi-production-c970.up.railway.app
-WEBSITE_API_EMAIL=agent@example.com
-WEBSITE_API_PASSWORD=your_password
-WEBSITE_API_AGENT_IDS=agent-id-1,agent-id-2,agent-id-3,agent-id-4,agent-id-5,agent-id-6,agent-id-7,agent-id-8
-AGENT_DISTRIBUTION_COUNT=8
-DASHBOARD_DISPLAY_USER=Administrator
-```
-
-The account must be able to log in and access both `/api/Agents` and
-`/api/Apartments`. Uploaded records store their assigned agent locally, and failed
-uploads are retried. If the credentials are omitted, API uploading is disabled.
-Set `WEBSITE_API_AGENT_IDS` to control which agents participate and their assignment
-order. The scraper requires the number set by `AGENT_DISTRIBUTION_COUNT` (eight by
-default). If IDs are omitted, the first eight agents sorted by ID are used. The scraper dashboard shows all apartments and the agent
-ID assigned to each one; API-wide admin visibility is governed by the admin account's
-permissions in the Website API.
-The dashboard displays `DASHBOARD_DISPLAY_USER`, or the API login email when no
-display name is configured, so viewers can see which account the scraper uses.
+Scraped MyHome and SS.ge records stay in the scraper's private dataset and are
+never published to the Velven Apartments API. Website API credentials may still
+be used for dashboard authentication, but they do not enable apartment uploads.
 
 Do not poll aggressively. MyHome can change its layout or access controls; the
 scraper reports individual listings it cannot parse and continues watching.
