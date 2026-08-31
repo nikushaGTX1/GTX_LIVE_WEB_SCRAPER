@@ -102,6 +102,7 @@
     const message = document.getElementById('watcher-message');
     let watcherConfig = null;
     let reviewInteractionUntil = 0;
+    let wordImportInProgress = false;
     if (count.textContent.includes('{{LISTING_COUNT}}')) count.textContent = '0';
     if (viewer.textContent.includes('{{LOGGED_IN_AS}}')) viewer.textContent = 'Template preview';
     if (viewerRole.textContent.includes('{{LOGGED_IN_ROLE}}')) viewerRole.textContent = 'admin';
@@ -277,14 +278,18 @@
       }
     });
     const wordApartmentsFile = document.getElementById('word-apartments-file');
-    document.getElementById('import-word-apartments').addEventListener('click', () => {
+    const importWordButton = document.getElementById('import-word-apartments');
+    importWordButton.addEventListener('click', () => {
       wordApartmentsFile.value = '';
       wordApartmentsFile.click();
     });
     wordApartmentsFile.addEventListener('change', async () => {
       const file = wordApartmentsFile.files[0];
       if (!file) return;
+      wordImportInProgress = true;
+      importWordButton.disabled = true;
       try {
+        importWordButton.textContent = 'Reading Word…';
         if (!window.mammoth) throw new Error('Word reader could not load. Check your internet connection and try again.');
         const converted = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
         const parsed = new DOMParser().parseFromString(converted.value, 'text/html');
@@ -304,17 +309,27 @@
         const tableUrls = new Set(tableRows.map(row => row.url || row.URL || row.link || row.Link).filter(Boolean));
         const rows = [...tableRows, ...urls.filter(url => !tableUrls.has(url)).map(url => ({ url }))];
         if (!rows.length) throw new Error('No MyHome links were found in the Word document.');
-        const response = await fetch('/api/apartments/import-word', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ rows })
-        });
-        const result = await response.json();
-        if (!response.ok) throw new Error(result.error || 'Could not import Word apartments');
-        alert(`Imported ${result.imported} apartment link(s) from Word${result.duplicates ? `; skipped ${result.duplicates} already saved` : ''}${result.excluded ? `; excluded ${result.excluded} by description filters` : ''}${result.detailErrors ? `; ${result.detailErrors} link(s) need detail refresh` : ''}.`);
+        const totals = { imported: 0, duplicates: 0, excluded: 0, detailErrors: 0 };
+        const batchSize = 10;
+        for (let start = 0; start < rows.length; start += batchSize) {
+          const batch = rows.slice(start, start + batchSize);
+          importWordButton.textContent = `Importing ${Math.min(start + batch.length, rows.length)}/${rows.length}…`;
+          const response = await fetch('/api/apartments/import-word', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ rows: batch })
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(`${result.error || 'Could not import Word apartments'} (${start} of ${rows.length} processed)`);
+          for (const key of Object.keys(totals)) totals[key] += Number(result[key] || 0);
+        }
+        alert(`Found ${rows.length} link(s). Imported ${totals.imported}${totals.duplicates ? `; skipped ${totals.duplicates} already saved` : ''}${totals.excluded ? `; excluded ${totals.excluded} by description filters` : ''}${totals.detailErrors ? `; ${totals.detailErrors} link(s) need detail refresh` : ''}.`);
         location.href = '/';
       } catch (error) {
         alert(error.message);
+        wordImportInProgress = false;
+        importWordButton.disabled = false;
+        importWordButton.textContent = 'Import Word links';
       }
     });
     setInterval(() => {
@@ -487,7 +502,7 @@
     });
     setInterval(() => {
       const editingReview = document.activeElement.closest?.('.comment-row');
-      if (!ownersView && watcherConfig?.enabled && !editingReview && Date.now() > reviewInteractionUntil && !document.activeElement.closest?.('.admin-controls')) location.reload();
+      if (!ownersView && !wordImportInProgress && watcherConfig?.enabled && !editingReview && Date.now() > reviewInteractionUntil && !document.activeElement.closest?.('.admin-controls')) location.reload();
     }, 3000);
   </script>
 </body>
