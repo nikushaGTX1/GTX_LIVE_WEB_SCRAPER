@@ -310,8 +310,15 @@ function buildDashboard(viewer = null, view = 'all') {
     ...Object.values(readJsonFile(SS_DATA_PATH)).map(item => ({ ...item, source: 'SS.ge' }))
   ].filter(item => !item._baseline && !item._excluded && item._review_status !== 'rejected' && !hasExcludedDescription(item.description))
     .sort((a, b) => String(b.first_seen).localeCompare(String(a.first_seen)));
-  if (view === 'accepted') combined = combined.filter(item => item._review_status === 'accepted');
-  const showManagementComments = view === 'accepted';
+  if (viewer?.role === 'agent') {
+    combined = combined.filter(item =>
+      String(item.assigned_agent_id || '') === String(viewer.agentId || '') &&
+      (view === 'accepted' ? item._review_status === 'accepted' : item._review_status !== 'accepted')
+    );
+  } else if (view === 'accepted' || viewer?.role === 'manager') {
+    combined = combined.filter(item => item._review_status === 'accepted');
+  }
+  const showManagementComments = view === 'accepted' || viewer?.role === 'manager';
 
   const rows = combined.map(item => {
     const websiteStatus = item._api_uploaded
@@ -323,6 +330,7 @@ function buildDashboard(viewer = null, view = 'all') {
       <td><span class="source ${item.source === 'SS.ge' ? 'ss' : ''}">${html(item.source)}</span></td>
       <td>${html(item.apartment_id)}</td>
       <td>${html(item.district || 'Other')}</td>
+      <td>${html(item.assigned_agent_name || item.assigned_agent_id || 'Pending')}</td>
       <td>${html(item.rooms || '—')}</td>
       <td>${html(item.bedrooms || '—')}</td>
       <td>${html(item.area_m2 ? `${item.area_m2} m²` : '—')}</td>
@@ -345,13 +353,13 @@ function buildDashboard(viewer = null, view = 'all') {
     throw new Error(`Dashboard template is missing: ${DASHBOARD_TEMPLATE_PATH}`);
   }
   const content = view === 'owners' ? buildOwnersContent(viewer) : combined.length
-    ? `<table><thead><tr><th>Source</th><th>ID</th><th>District</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th><th>Website</th>${showManagementComments ? '<th>Accepted by</th><th>Comment</th>' : ''}<th>Review</th></tr></thead><tbody>${rows}</tbody></table>`
+    ? `<table><thead><tr><th>Source</th><th>ID</th><th>District</th><th>Assigned agent</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th><th>Website</th>${showManagementComments ? '<th>Accepted by</th><th>Comment</th>' : ''}<th>Review</th></tr></thead><tbody>${rows}</tbody></table>`
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
     .replace('{{LISTING_COUNT}}', String(view === 'owners' ? ownersData(viewer).rows.length : combined.length))
     .replace('{{LOGGED_IN_AS}}', html(viewer?.name || viewer?.email || process.env.DASHBOARD_DISPLAY_USER || process.env.WEBSITE_API_EMAIL || 'Local viewer'))
     .replace('{{LOGGED_IN_ROLE}}', html(viewer?.role || 'admin'))
-    .replace('{{CURRENT_VIEW}}', view === 'owners' ? 'owners' : (view === 'accepted' ? 'accepted' : 'all'))
+    .replace('{{CURRENT_VIEW}}', view === 'owners' ? 'owners' : (view === 'accepted' || viewer?.role === 'manager' ? 'accepted' : 'all'))
     .replace('{{DASHBOARD_CONTENT}}', content);
   return document;
 }
@@ -579,6 +587,12 @@ async function reviewApartment(request, response, viewer, apartmentId) {
     if (!item) {
       response.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });
       response.end(JSON.stringify({ error: 'Apartment not found' }));
+      return;
+    }
+    if (!['admin', 'manager'].includes(viewer.role) &&
+        String(item.assigned_agent_id || '') !== String(viewer.agentId || '')) {
+      response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ error: 'This apartment is assigned to another agent' }));
       return;
     }
     if (body.action === 'manager-selection') {
@@ -1491,12 +1505,13 @@ function websiteApartmentFromResponse(payload) {
   return payload.apartment || payload.data?.apartment || payload.data || payload.result || payload;
 }
 
-async function uploadApartmentToWebsite(item) {
+async function uploadApartmentToWebsite(item, agentId) {
   const existing = await websiteApiHasApartment(item);
   if (existing) return { existing: true, apartment: existing };
 
   const sourceLabel = item.source === 'SS.ge' ? 'SS.ge' : 'MyHome';
   const form = new FormData();
+  form.set('UploadedByUserId', agentId);
   form.set('Title', item.title || `${sourceLabel} apartment ${item.apartment_id}`);
   form.set('Description', `${item.description || ''}\n\nSource: ${item.url}\n${sourceLabel} ID: ${item.apartment_id}\nSource ID: ${item.apartment_id}`.trim());
   form.set('City', 'Tbilisi');
@@ -1529,14 +1544,33 @@ async function syncPendingWebsiteApartments(data, state, onlyApartmentId = null,
     .sort((a, b) => String(a.first_seen).localeCompare(String(b.first_seen)));
   if (!pending.length) return 0;
 
+  const agents = await getDistributionAgents();
   let uploaded = 0;
   for (let pendingIndex = 0; pendingIndex < pending.length; pendingIndex += 1) {
     const item = pending[pendingIndex];
     const sourceLabel = item.source === 'SS.ge' ? 'SS.ge' : 'MyHome';
-    watcherStatus.state = 'uploading';
-    watcherStatus.message = `Uploading ${sourceLabel} apartment ${pendingIndex + 1} of ${pending.length} to website…`;
+    watcherStatus.state = 'assigning';
+    watcherStatus.message = `Assigning ${sourceLabel} apartment ${pendingIndex + 1} of ${pending.length} to agents…`;
+    let agent = item.assigned_agent_id
+      ? agents.find(candidate => candidate.id === String(item.assigned_agent_id))
+      : null;
+    if (!agent) {
+      const index = Number(state.api_assignment_index || 0) % agents.length;
+      agent = agents[index];
+      item.assigned_agent_id = agent.id;
+      item.assigned_agent_name = agentDisplayName(agent);
+      item._assigned_at = new Date().toISOString();
+      state.api_assignment_index = Number(state.api_assignment_index || 0) + 1;
+      saveData(data, dataPath, csvPath);
+      saveState(state);
+    } else if (!item.assigned_agent_name) {
+      item.assigned_agent_name = agentDisplayName(agent);
+      saveData(data, dataPath, csvPath);
+    }
     try {
-      const uploadedResult = await uploadApartmentToWebsite(item);
+      watcherStatus.state = 'uploading';
+      watcherStatus.message = `Uploading ${sourceLabel} apartment ${pendingIndex + 1} of ${pending.length} for ${item.assigned_agent_name || agent.id}…`;
+      const uploadedResult = await uploadApartmentToWebsite(item, agent.id);
       const websiteApartment = websiteApartmentFromResponse(uploadedResult?.apartment || uploadedResult);
       const websiteId = Number(websiteApartment?.id ?? websiteApartment?.apartmentId ?? websiteApartment?.apartment_id);
       if (Number.isInteger(websiteId) && websiteId > 0) item._website_api_apartment_id = websiteId;
@@ -1546,7 +1580,7 @@ async function syncPendingWebsiteApartments(data, state, onlyApartmentId = null,
       saveData(data, dataPath, csvPath);
       saveState(state);
       uploaded += 1;
-      console.log(`Uploaded ${sourceLabel} ID ${item.apartment_id} to Website API${item._website_api_apartment_id ? ` as apartment ${item._website_api_apartment_id}` : ''}.`);
+      console.log(`Uploaded ${sourceLabel} ID ${item.apartment_id} to agent ${agent.id}${item._website_api_apartment_id ? ` as apartment ${item._website_api_apartment_id}` : ''}.`);
     } catch (error) {
       item._api_error = error.message;
       saveData(data, dataPath, csvPath);
@@ -1803,6 +1837,12 @@ async function main() {
   const excludedSs = markExcludedDescriptions(ssData);
   const clearedStreetErrors = clearLegacyStreetUploadErrors(data) + clearLegacyStreetUploadErrors(ssData);
   const clearedStreetData = clearLegacyStreetData(data) + clearLegacyStreetData(ssData);
+  try {
+    const named = await hydrateAssignedAgentNames(data) + await hydrateAssignedAgentNames(ssData);
+    if (named) console.log(`Resolved display names for ${named} assigned apartment(s).`);
+  } catch (error) {
+    console.error(`Could not resolve existing agent display names: ${error.message}`);
+  }
   saveData(data);
   saveData(ssData, SS_DATA_PATH, SS_CSV_PATH);
   if (clearedStreetErrors) console.log(`Cleared ${clearedStreetErrors} obsolete street-resolution upload error(s); those apartments will retry without streets.`);
