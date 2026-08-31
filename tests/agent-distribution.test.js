@@ -27,3 +27,11 @@ test('agents only see and review their own assigned apartments', () => {
   assert.match(source, /This apartment is assigned to another agent/);
   assert.match(source, /<th>Assigned agent<\/th>/);
 });
+
+test('comment updates are handled inside the apartment review handler', () => {
+  const reviewStart = source.indexOf('async function reviewApartment');
+  const serverStart = source.indexOf('function startWebServer');
+  const reviewSource = source.slice(reviewStart, serverStart);
+  assert.match(reviewSource, /body\.action === 'update-comment'/);
+  assert.doesNotMatch(source.slice(serverStart), /body\.action === 'update-comment'/);
+});

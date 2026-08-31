@@ -627,6 +627,18 @@ async function reviewApartment(request, response, viewer, apartmentId) {
       response.end(JSON.stringify({ ok: true, selected: item._manager_selected }));
       return;
     }
+    if (body.action === 'update-comment') {
+      if (item._review_status !== 'accepted') throw new Error('Only accepted apartment comments can be updated');
+      if (!comment) throw new Error('Comment is required');
+      item._review_comment = comment;
+      item._comment_updated_by = viewer.name || viewer.email;
+      item._comment_updated_at = new Date().toISOString();
+      if (data === myHomeData) saveData(data);
+      else saveData(data, SS_DATA_PATH, SS_CSV_PATH);
+      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ ok: true, status: item._review_status, comment: item._review_comment }));
+      return;
+    }
     item._review_status = body.action;
     item._review_comment = comment;
     item._reviewed_by = viewer.name || viewer.email;
@@ -686,18 +698,6 @@ function startWebServer() {
       });
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       response.end(JSON.stringify({ entries }));
-      return;
-    }
-    if (body.action === 'update-comment') {
-      if (item._review_status !== 'accepted') throw new Error('Only accepted apartment comments can be updated');
-      if (!comment) throw new Error('Comment is required');
-      item._review_comment = comment;
-      item._comment_updated_by = viewer.name || viewer.email;
-      item._comment_updated_at = new Date().toISOString();
-      if (data === myHomeData) saveData(data);
-      else saveData(data, SS_DATA_PATH, SS_CSV_PATH);
-      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-      response.end(JSON.stringify({ ok: true, status: item._review_status, comment: item._review_comment }));
       return;
     }
     if (pathname === '/api/apartments' && request.method === 'DELETE') {
@@ -1546,8 +1546,9 @@ async function getDistributionAgents() {
     const missing = configuredIds.filter(id => !found.has(id));
     throw new Error(`Configured Website API agent IDs were not found: ${missing.join(', ')}`);
   }
-  if (websiteApiAgents.length !== distributionCount) {
-    throw new Error(`Round-robin requires exactly ${distributionCount} agents; resolved ${websiteApiAgents.length}`);
+  if (!websiteApiAgents.length) throw new Error('Round-robin could not resolve any agents');
+  if (!configuredIds.length && websiteApiAgents.length < distributionCount) {
+    console.warn(`Round-robin requested ${distributionCount} agents but resolved ${websiteApiAgents.length}; using all available agents.`);
   }
   return websiteApiAgents;
 }
