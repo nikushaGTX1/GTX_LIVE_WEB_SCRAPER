@@ -19,9 +19,11 @@ test('Owners endpoint atomically upserts and merges platform columns', () => {
   assert.match(source, /incoming\[columnIndex\] \|\| clean\(data\.rows\[rowIndex\]\[columnIndex\]\)/);
 });
 
-test('extension owner uploads feed the central Administrator database', () => {
+test('extension owner uploads feed the authenticated agent and central Administrator databases', () => {
   assert.match(source, /const ADMIN_OWNERS_PATH = path\.join\(DATA_ROOT, 'owners-admin\.json'\)/);
+  assert.match(source, /const accountResult = upsertOwnerRow\(viewer, incoming\)/);
   assert.match(source, /const adminViewer = \{ role: 'admin', email: 'owners-inbox' \}/);
+  assert.match(source, /sameDatabase \? accountResult : upsertOwnerRow\(adminViewer, incoming\)/);
   assert.match(source, /\^owners-\[a-f0-9\]\{24\}\\\.json\$/i);
   assert.match(source, /rows = mergeOwnerRows\(rows, normalizedOwnersData\(readJsonFile\(legacyPath\)\)\.rows\)/);
 });

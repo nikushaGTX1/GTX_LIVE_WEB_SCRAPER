@@ -66,6 +66,7 @@ const watcherStatus = {
   importTotal: 0, lastStartedAt: null, lastCompletedAt: null, lastError: null
 };
 const dashboardApiSessions = new Map();
+const dashboardLogoutChallenges = new Map();
 
 function clean(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
@@ -281,6 +282,20 @@ function mergeOwnerRows(targetRows, sourceRows) {
     }
   }
   return merged;
+}
+
+function upsertOwnerRow(viewer, incoming) {
+  const data = ownersData(viewer);
+  let rowIndex = data.rows.findIndex(row => clean(row[0]) === incoming[0]);
+  const created = rowIndex < 0;
+  if (created) {
+    data.rows.unshift(incoming);
+    rowIndex = 0;
+  } else {
+    data.rows[rowIndex] = OWNER_HEADERS.map((_, columnIndex) => incoming[columnIndex] || clean(data.rows[rowIndex][columnIndex]));
+  }
+  fs.writeFileSync(ownersPathFor(viewer), JSON.stringify(data, null, 2), 'utf8');
+  return { created, rowIndex, rowCount: data.rows.length };
 }
 
 function ownersData(viewer) {
@@ -677,6 +692,32 @@ function startWebServer() {
       response.end(JSON.stringify({ ok: true }));
       return;
     }
+    if (pathname === '/logout') {
+      const supplied = request.headers.authorization || '';
+      const suppliedHash = crypto.createHash('sha256').update(supplied).digest('hex');
+      const challenge = requestUrl.searchParams.get('challenge');
+      if (!challenge) {
+        const nonce = crypto.randomBytes(18).toString('hex');
+        dashboardLogoutChallenges.set(nonce, { suppliedHash, expiresAt: Date.now() + 5 * 60 * 1000 });
+        response.writeHead(302, { location: `/logout?challenge=${nonce}`, 'cache-control': 'no-store' });
+        response.end();
+        return;
+      }
+      const pendingLogout = dashboardLogoutChallenges.get(challenge);
+      if (pendingLogout && pendingLogout.expiresAt > Date.now() && supplied && suppliedHash !== pendingLogout.suppliedHash) {
+        dashboardLogoutChallenges.delete(challenge);
+        response.writeHead(302, { location: '/', 'cache-control': 'no-store' });
+        response.end();
+        return;
+      }
+      response.writeHead(401, {
+        'WWW-Authenticate': 'Basic realm="Apartment Watcher - Sign in with another account"',
+        'content-type': 'text/html; charset=utf-8',
+        'cache-control': 'no-store'
+      });
+      response.end('<!doctype html><title>Logged out</title><p>Logged out. Enter another account in the browser login prompt, or reload this page.</p>');
+      return;
+    }
     const viewer = await authenticateDashboard(request, response);
     if (!viewer) return;
     if (pathname === '/api/watcher/config' && request.method === 'GET') {
@@ -854,19 +895,12 @@ function startWebServer() {
         if (!Array.isArray(body.row)) throw new Error('Owner row is required');
         const incoming = OWNER_HEADERS.map((_, index) => clean(body.row[index]).slice(0, 4000));
         if (!incoming[0]) throw new Error('Owner ID is required');
+        const accountResult = upsertOwnerRow(viewer, incoming);
         const adminViewer = { role: 'admin', email: 'owners-inbox' };
-        const data = ownersData(adminViewer);
-        let rowIndex = data.rows.findIndex(row => clean(row[0]) === incoming[0]);
-        const created = rowIndex < 0;
-        if (created) {
-          data.rows.unshift(incoming);
-          rowIndex = 0;
-        } else {
-          data.rows[rowIndex] = OWNER_HEADERS.map((_, columnIndex) => incoming[columnIndex] || clean(data.rows[rowIndex][columnIndex]));
-        }
-        fs.writeFileSync(ownersPathFor(adminViewer), JSON.stringify(data, null, 2), 'utf8');
+        const sameDatabase = ownersPathFor(viewer) === ownersPathFor(adminViewer);
+        const adminResult = sameDatabase ? accountResult : upsertOwnerRow(adminViewer, incoming);
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-        response.end(JSON.stringify({ ok: true, created, rowIndex, rowCount: data.rows.length }));
+        response.end(JSON.stringify({ ok: true, ...accountResult, adminRowCount: adminResult.rowCount }));
       } catch (error) {
         response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify({ error: error.message }));

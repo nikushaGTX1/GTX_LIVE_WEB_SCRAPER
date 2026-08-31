@@ -147,11 +147,12 @@ if the API token does not include an admin role. Other authenticated users are
 treated as agents and filtered by their authenticated user ID.
 
 API clients may send the same Website API JWT as `Authorization: Bearer <token>`.
-`POST /api/owners/upsert` accepts `{ "row": [...] }`, identifies the central
-Administrator owner record by the first (owner ID) column, and atomically inserts
-it or merges its non-empty values. This is the endpoint used by the browser
-extension so uploads made while connected as an Agent still appear in the
-Administrator Owners view and MyHome/SS.ge IDs safely accumulate in one row.
+`POST /api/owners/upsert` accepts `{ "row": [...] }`, identifies the owner record
+by the first (owner ID) column, and inserts it or merges its non-empty values into
+both the authenticated Agent's Owners database and the central Administrator
+database. This is the endpoint used by the browser extension, so the uploading
+Agent and administrators both see the row while MyHome/SS.ge IDs safely
+accumulate in one record.
 The first Administrator read migrates rows written by older per-account versions
 into this central database.
 
