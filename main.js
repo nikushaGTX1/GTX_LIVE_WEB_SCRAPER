@@ -258,11 +258,19 @@ function myHomePhoneInfo(source = {}) {
 function normalizedOwnersData(saved) {
   if (!Array.isArray(saved.rows)) return { headers: OWNER_HEADERS, rows: [] };
   const savedHeaders = Array.isArray(saved.headers) ? saved.headers.map(clean) : [];
-  const rows = saved.rows.map(row => OWNER_HEADERS.map((header, columnIndex) => {
+  const normalizedRows = saved.rows.map(row => OWNER_HEADERS.map((header, columnIndex) => {
     const matchingIndex = savedHeaders.indexOf(header);
     const sourceIndex = matchingIndex >= 0 ? matchingIndex : columnIndex;
     return clean(Array.isArray(row) ? row[sourceIndex] : '');
   }));
+  const seenOwnerIds = new Set();
+  const rows = normalizedRows.filter(row => {
+    const ownerId = clean(row[0]);
+    if (!ownerId) return true;
+    if (seenOwnerIds.has(ownerId)) return false;
+    seenOwnerIds.add(ownerId);
+    return true;
+  });
   return { headers: OWNER_HEADERS, rows };
 }
 
@@ -277,8 +285,6 @@ function mergeOwnerRows(targetRows, sourceRows) {
     if (existingIndex == null) {
       indexes.set(ownerId, merged.length);
       merged.push(incoming);
-    } else {
-      merged[existingIndex] = OWNER_HEADERS.map((_, columnIndex) => incoming[columnIndex] || merged[existingIndex][columnIndex]);
     }
   }
   return merged;
@@ -291,15 +297,31 @@ function upsertOwnerRow(viewer, incoming) {
   if (created) {
     data.rows.unshift(incoming);
     rowIndex = 0;
-  } else {
-    data.rows[rowIndex] = OWNER_HEADERS.map((_, columnIndex) => incoming[columnIndex] || clean(data.rows[rowIndex][columnIndex]));
   }
   fs.writeFileSync(ownersPathFor(viewer), JSON.stringify(data, null, 2), 'utf8');
   return { created, rowIndex, rowCount: data.rows.length };
 }
 
+function applyAcceptedCommentsToOwners(data) {
+  const acceptedComments = new Map(
+    [...Object.values(liveMyHomeData || loadData()), ...Object.values(liveSsData || loadSsData())]
+      .filter(item => item._review_status === 'accepted' && clean(item._review_comment))
+      .map(item => [clean(item.apartment_id), clean(item._review_comment)])
+  );
+  let changed = false;
+  for (const row of data.rows) {
+    const comment = acceptedComments.get(clean(row[0]));
+    if (comment && clean(row[8]) !== comment) {
+      row[8] = comment;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function ownersData(viewer) {
   const accountPath = ownersPathFor(viewer);
+  let data;
   if (viewer?.role === 'admin' && !fs.existsSync(accountPath)) {
     let rows = [];
     const legacyPaths = fs.readdirSync(DATA_ROOT)
@@ -307,10 +329,14 @@ function ownersData(viewer) {
       .map(name => path.join(DATA_ROOT, name));
     if (fs.existsSync(OWNERS_PATH)) legacyPaths.unshift(OWNERS_PATH);
     for (const legacyPath of legacyPaths) rows = mergeOwnerRows(rows, normalizedOwnersData(readJsonFile(legacyPath)).rows);
-    fs.writeFileSync(accountPath, JSON.stringify({ headers: OWNER_HEADERS, rows }, null, 2), 'utf8');
-    return { headers: OWNER_HEADERS, rows };
+    data = { headers: OWNER_HEADERS, rows };
+  } else {
+    data = normalizedOwnersData(readJsonFile(accountPath));
   }
-  return normalizedOwnersData(readJsonFile(accountPath));
+  if (applyAcceptedCommentsToOwners(data) || !fs.existsSync(accountPath)) {
+    fs.writeFileSync(accountPath, JSON.stringify(data, null, 2), 'utf8');
+  }
+  return data;
 }
 
 function buildOwnersContent(viewer) {
