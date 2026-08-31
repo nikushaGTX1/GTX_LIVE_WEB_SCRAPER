@@ -414,6 +414,11 @@ a:hover { text-decoration: underline; }
 .management-comment { min-width: 220px; max-width: 360px; white-space: normal; }
 .management-comment strong { display: block; font-weight: 600; white-space: pre-wrap; }
 .management-comment small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }
+.accepted-comment-edit { display: grid; gap: 6px; min-width: 260px; }
+.accepted-comment-editor { width: 100%; min-height: 58px; resize: vertical; padding: 8px; border: 1px solid var(--line); border-radius: 8px; font: inherit; }
+.accepted-comment-editor:focus { border-color: #20a464; outline: 3px solid rgb(32 164 100 / 12%); }
+.update-comment { justify-self: end; padding: 7px 10px; border: 0; border-radius: 7px; background: #168653; color: #fff; cursor: pointer; font-weight: 700; }
+.update-comment:disabled { cursor: wait; opacity: .75; }
 .accepted-agent { min-width: 170px; }
 .accepted-agent strong { display: block; }
 .accepted-agent small { display: block; margin-top: 4px; color: var(--muted); font-size: 10px; }

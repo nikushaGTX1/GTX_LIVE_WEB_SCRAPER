@@ -347,7 +347,7 @@ function buildDashboard(viewer = null, view = 'all') {
       <td class="${item.phone ? '' : 'masked-phone'}">${html(item.phone || item._masked_phone || '—')}</td>
       <td><a class="listing-link" href="${html(item.url)}" target="_blank" rel="noopener noreferrer">Open listing ↗</a></td>
       <td>${websiteStatus}</td>
-      ${showManagementComments ? `<td class="accepted-agent"><strong>${html(item._reviewed_by || 'Unknown agent')}</strong><small>${item._reviewed_at ? html(item._reviewed_at) : ''}</small></td><td class="management-comment"><strong>${html(item._review_comment || '—')}</strong></td>` : ''}
+      ${showManagementComments ? `<td class="accepted-agent"><strong>${html(item._reviewed_by || 'Unknown agent')}</strong><small>${item._reviewed_at ? html(item._reviewed_at) : ''}</small></td><td class="management-comment"><div class="accepted-comment-edit"><textarea class="accepted-comment-editor" maxlength="2000" aria-label="Apartment comment">${html(item._review_comment || '')}</textarea><button class="update-comment" type="button">Save comment</button></div></td>` : ''}
     </tr>`;
     if (view === 'accepted') return apartmentRow;
     const columnCount = showManagementComments ? 15 : 13;
@@ -595,7 +595,7 @@ async function reviewApartment(request, response, viewer, apartmentId) {
   try {
     if (!/^\d+$/.test(apartmentId)) throw new Error('Invalid apartment ID');
     const body = await readRequestJson(request);
-    if (!['accepted', 'rejected', 'manager-selection'].includes(body.action)) throw new Error('Invalid review action');
+    if (!['accepted', 'rejected', 'manager-selection', 'update-comment'].includes(body.action)) throw new Error('Invalid review action');
     const comment = clean(body.comment || '').slice(0, 2000);
     const myHomeData = liveMyHomeData || loadData();
     const ssData = liveSsData || loadSsData();
@@ -686,6 +686,18 @@ function startWebServer() {
       });
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       response.end(JSON.stringify({ entries }));
+      return;
+    }
+    if (body.action === 'update-comment') {
+      if (item._review_status !== 'accepted') throw new Error('Only accepted apartment comments can be updated');
+      if (!comment) throw new Error('Comment is required');
+      item._review_comment = comment;
+      item._comment_updated_by = viewer.name || viewer.email;
+      item._comment_updated_at = new Date().toISOString();
+      if (data === myHomeData) saveData(data);
+      else saveData(data, SS_DATA_PATH, SS_CSV_PATH);
+      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ ok: true, status: item._review_status, comment: item._review_comment }));
       return;
     }
     if (pathname === '/api/apartments' && request.method === 'DELETE') {

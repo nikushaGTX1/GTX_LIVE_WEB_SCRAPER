@@ -263,17 +263,27 @@
     document.querySelector('.district-filters').addEventListener('click', async event => {
       const button = event.target.closest('.district-remove');
       if (!button) return;
+      event.preventDefault();
+      event.stopPropagation();
       const district = button.dataset.district;
       if (!confirm(`Remove every saved apartment from ${district}? This cannot be undone.`)) return;
+      reviewInteractionUntil = Date.now() + 5 * 60 * 1000;
       button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
       try {
         const response = await fetch(`/api/apartments?district=${encodeURIComponent(district)}`, { method: 'DELETE' });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'Could not remove district apartments');
+        document.querySelectorAll(`tr.apartment-row[data-district="${CSS.escape(district)}"]`).forEach(row => {
+          document.querySelector(`tr.comment-row[data-comment-for="${row.dataset.apartmentId}"]`)?.remove();
+          row.remove();
+        });
         alert(`Removed ${result.removed} apartment(s) from ${district}.`);
-        location.reload();
+        location.href = '/';
       } catch (error) {
         button.disabled = false;
+        button.removeAttribute('aria-busy');
+        reviewInteractionUntil = Date.now() + 10000;
         alert(error.message);
       }
     });
@@ -462,6 +472,27 @@
       if (!row) return;
       reviewInteractionUntil = Date.now() + 10000;
       try {
+        if (event.target.closest('.update-comment')) {
+          const button = event.target.closest('.update-comment');
+          const editor = row.querySelector('.accepted-comment-editor');
+          const comment = editor.value.trim();
+          if (!comment) {
+            alert('Please enter a comment before saving.');
+            editor.focus();
+            return;
+          }
+          reviewInteractionUntil = Date.now() + 5 * 60 * 1000;
+          button.disabled = true;
+          button.textContent = 'Saving…';
+          await saveReview(row, 'update-comment', comment);
+          button.textContent = 'Saved';
+          editor.defaultValue = comment;
+          setTimeout(() => {
+            button.disabled = false;
+            button.textContent = 'Save comment';
+          }, 1000);
+          return;
+        }
         if (event.target.closest('.reject-button')) {
           if (!confirm('Reject and remove this apartment from your list?')) return;
           await saveReview(row, 'rejected');
