@@ -36,6 +36,7 @@
       <button id="import-word-apartments" type="button">Import Word links</button>
       <button id="copy-accepted-links" type="button" data-management-only>Copy accepted links</button>
     </nav>
+    <p id="word-import-status" class="word-import-status" hidden aria-live="polite"></p>
 
     <section class="admin-controls" id="admin-controls" aria-labelledby="watcher-controls-title">
       <div class="control-heading">
@@ -289,6 +290,17 @@
     });
     const wordApartmentsFile = document.getElementById('word-apartments-file');
     const importWordButton = document.getElementById('import-word-apartments');
+    const wordImportStatus = document.getElementById('word-import-status');
+    const savedWordImportStatus = localStorage.getItem('word-apartment-import-status');
+    if (savedWordImportStatus && managementNav.dataset.currentView === 'all') {
+      wordImportStatus.textContent = savedWordImportStatus;
+      wordImportStatus.hidden = false;
+    }
+    const showWordImportStatus = text => {
+      wordImportStatus.textContent = text;
+      wordImportStatus.hidden = false;
+      localStorage.setItem('word-apartment-import-status', text);
+    };
     importWordButton.addEventListener('click', () => {
       wordApartmentsFile.value = '';
       wordApartmentsFile.click();
@@ -319,8 +331,9 @@
         const tableUrls = new Set(tableRows.map(row => row.url || row.URL || row.link || row.Link).filter(Boolean));
         const rows = [...tableRows, ...urls.filter(url => !tableUrls.has(url)).map(url => ({ url }))];
         if (!rows.length) throw new Error('No MyHome links were found in the Word document.');
-        const totals = { imported: 0, duplicates: 0, excluded: 0, detailErrors: 0 };
+        const totals = { imported: 0, restored: 0, duplicates: 0, excluded: 0, detailErrors: 0 };
         const batchSize = 10;
+        showWordImportStatus(`Found ${rows.length} unique MyHome link(s). Starting import…`);
         for (let start = 0; start < rows.length; start += batchSize) {
           const batch = rows.slice(start, start + batchSize);
           importWordButton.textContent = `Importing ${Math.min(start + batch.length, rows.length)}/${rows.length}…`;
@@ -332,10 +345,16 @@
           const result = await response.json();
           if (!response.ok) throw new Error(`${result.error || 'Could not import Word apartments'} (${start} of ${rows.length} processed)`);
           for (const key of Object.keys(totals)) totals[key] += Number(result[key] || 0);
+          const processed = Math.min(start + batch.length, rows.length);
+          showWordImportStatus(`Processed ${processed}/${rows.length} · Added ${totals.imported} · Restored ${totals.restored} · Already saved ${totals.duplicates} · Filtered ${totals.excluded}`);
         }
-        alert(`Found ${rows.length} link(s). Imported ${totals.imported}${totals.duplicates ? `; skipped ${totals.duplicates} already saved` : ''}${totals.excluded ? `; excluded ${totals.excluded} by description filters` : ''}${totals.detailErrors ? `; ${totals.detailErrors} link(s) need detail refresh` : ''}.`);
+        const visibleAdded = totals.imported - totals.excluded;
+        const finalStatus = `Word import complete · Found ${rows.length} · Visible apartments added ${visibleAdded} · Restored ${totals.restored} · Already saved ${totals.duplicates} · Filtered ${totals.excluded}${totals.detailErrors ? ` · Detail errors ${totals.detailErrors}` : ''}`;
+        showWordImportStatus(finalStatus);
+        alert(finalStatus);
         location.href = '/';
       } catch (error) {
+        showWordImportStatus(`Word import stopped: ${error.message}`);
         alert(error.message);
         wordImportInProgress = false;
         importWordButton.disabled = false;

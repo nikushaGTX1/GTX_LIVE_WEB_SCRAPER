@@ -754,6 +754,7 @@ function startWebServer() {
         };
         const data = liveMyHomeData || loadData();
         let imported = 0;
+        let restored = 0;
         let excluded = 0;
         let duplicates = 0;
         let detailErrors = 0;
@@ -769,10 +770,13 @@ function startWebServer() {
           if (values.url) values.url = validateMyHomeUrl(values.url);
           const urlId = String(values.url || '').match(/(?:^|\D)(\d{5,})(?:\D|$)/)?.[1];
           let apartmentId = clean(values.apartment_id).replace(/\D/g, '') || urlId || String(Date.now() + rowIndex);
-          if (data[apartmentId]) {
+          const existing = data[apartmentId];
+          const manuallyRemoved = existing?._excluded && /^District removed by /i.test(existing._excluded_reason || '');
+          if (existing && !manuallyRemoved) {
             duplicates += 1;
             continue;
           }
+          if (manuallyRemoved) restored += 1;
           const urlSlug = values.url ? new URL(values.url).pathname.split('/').filter(Boolean).at(-1) || '' : '';
           let item = {
             apartment_id: apartmentId,
@@ -790,6 +794,7 @@ function startWebServer() {
               const phoneInfo = myHomePhoneInfo(detail);
               item = myHomeApartment(detail, apartmentId, phoneInfo.phone, item.first_seen, item.district);
               item._imported_from_word = true;
+              item._baseline = false;
             } catch (error) {
               item._word_import_error = error.message;
               detailErrors += 1;
@@ -805,14 +810,14 @@ function startWebServer() {
         }
         if (!imported && duplicates) {
           response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-          response.end(JSON.stringify({ ok: true, imported, excluded, duplicates, detailErrors }));
+          response.end(JSON.stringify({ ok: true, imported, restored, excluded, duplicates, detailErrors }));
           return;
         }
         if (!imported) throw new Error('No usable MyHome links were found in the Word document');
         saveData(data);
         await assignPendingApartments(data, loadState());
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-        response.end(JSON.stringify({ ok: true, imported, excluded, duplicates, detailErrors }));
+        response.end(JSON.stringify({ ok: true, imported, restored, excluded, duplicates, detailErrors }));
       } catch (error) {
         response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify({ error: error.message }));

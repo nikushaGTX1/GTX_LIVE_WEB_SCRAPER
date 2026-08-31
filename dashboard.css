@@ -104,6 +104,8 @@ h1 {
 .management-nav button { padding: 9px 13px; border: 0; border-radius: 10px; background: #172033; color: #fff; cursor: pointer; font: inherit; font-size: 13px; font-weight: 700; }
 #import-word-apartments { margin-left: auto; background: #0866d9; }
 .management-nav [hidden] { display: none; }
+.word-import-status { margin: -6px 0 14px; padding: 10px 12px; border: 1px solid #b9d7ff; border-radius: 10px; background: #eaf3ff; color: #174f91; font-size: 13px; font-weight: 700; }
+.word-import-status[hidden] { display: none; }
 
 .admin-controls {
   margin-bottom: 16px;
