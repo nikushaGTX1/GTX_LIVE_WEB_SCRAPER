@@ -76,10 +76,10 @@
 
     <nav class="district-filters" aria-label="Filter apartments by district">
       <button class="district-filter active" type="button" data-district="all">All</button>
-      <button class="district-filter" type="button" data-district="Saburtalo">Saburtalo</button>
-      <button class="district-filter" type="button" data-district="Vake">Vake</button>
-      <button class="district-filter" type="button" data-district="Didi Dighomi">Didi Dighomi</button>
-      <button class="district-filter" type="button" data-district="Digomi">Digomi</button>
+      <span class="district-control"><button class="district-filter" type="button" data-district="Saburtalo">Saburtalo</button><button class="district-remove" type="button" data-district="Saburtalo" aria-label="Remove every Saburtalo apartment" title="Remove every Saburtalo apartment" hidden>×</button></span>
+      <span class="district-control"><button class="district-filter" type="button" data-district="Vake">Vake</button><button class="district-remove" type="button" data-district="Vake" aria-label="Remove every Vake apartment" title="Remove every Vake apartment" hidden>×</button></span>
+      <span class="district-control"><button class="district-filter" type="button" data-district="Didi Dighomi">Didi Dighomi</button><button class="district-remove" type="button" data-district="Didi Dighomi" aria-label="Remove every Didi Dighomi apartment" title="Remove every Didi Dighomi apartment" hidden>×</button></span>
+      <span class="district-control"><button class="district-filter" type="button" data-district="Digomi">Digomi</button><button class="district-remove" type="button" data-district="Digomi" aria-label="Remove every Digomi apartment" title="Remove every Digomi apartment" hidden>×</button></span>
     </nav>
 
     <section class="results" id="dashboard-content" aria-label="Apartment results">
@@ -166,6 +166,7 @@
     const showWatcherConfig = config => {
       watcherConfig = config;
       document.getElementById('admin-controls').hidden = ownersView || !config.canAdmin;
+      document.querySelectorAll('.district-remove').forEach(button => { button.hidden = !config.canAdmin; });
       managementNav.hidden = false;
       managementNav.querySelectorAll('[data-management-only]').forEach(item => { item.hidden = !config.canManage; });
       const assignment = document.getElementById('assignment-status');
@@ -253,6 +254,23 @@
     };
     fetch('/api/watcher/config').then(response => response.json()).then(showWatcherConfig)
       .catch(error => { message.textContent = error.message; });
+    document.querySelector('.district-filters').addEventListener('click', async event => {
+      const button = event.target.closest('.district-remove');
+      if (!button) return;
+      const district = button.dataset.district;
+      if (!confirm(`Remove every saved apartment from ${district}? This cannot be undone.`)) return;
+      button.disabled = true;
+      try {
+        const response = await fetch(`/api/apartments?district=${encodeURIComponent(district)}`, { method: 'DELETE' });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Could not remove district apartments');
+        alert(`Removed ${result.removed} apartment(s) from ${district}.`);
+        location.reload();
+      } catch (error) {
+        button.disabled = false;
+        alert(error.message);
+      }
+    });
     setInterval(() => {
       fetch('/api/watcher/config').then(response => response.json())
         .then(config => showWatcherStatus(config.status)).catch(() => {});

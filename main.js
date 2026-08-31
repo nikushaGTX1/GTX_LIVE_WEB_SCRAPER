@@ -671,6 +671,40 @@ function startWebServer() {
       response.end(JSON.stringify({ entries }));
       return;
     }
+    if (pathname === '/api/apartments' && request.method === 'DELETE') {
+      if (viewer.role !== 'admin') {
+        response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: 'Admin access is required to remove a district' }));
+        return;
+      }
+      const district = clean(requestUrl.searchParams.get('district'));
+      if (!district) {
+        response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: 'District is required' }));
+        return;
+      }
+      const normalizedDistrict = district.toLocaleLowerCase('en-US');
+      const sources = [
+        { data: liveMyHomeData || loadData(), save: data => saveData(data) },
+        { data: liveSsData || loadSsData(), save: data => saveData(data, SS_DATA_PATH, SS_CSV_PATH) }
+      ];
+      let removed = 0;
+      for (const source of sources) {
+        let changed = false;
+        for (const item of Object.values(source.data)) {
+          if (clean(item.district).toLocaleLowerCase('en-US') !== normalizedDistrict || item._excluded) continue;
+          item._excluded = true;
+          item._excluded_reason = `District removed by ${viewer.email}`;
+          item._excluded_at = new Date().toISOString();
+          removed += 1;
+          changed = true;
+        }
+        if (changed) source.save(source.data);
+      }
+      response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+      response.end(JSON.stringify({ ok: true, district, removed }));
+      return;
+    }
     if (pathname === '/api/owners' && request.method === 'GET') {
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       response.end(JSON.stringify(ownersData(viewer)));

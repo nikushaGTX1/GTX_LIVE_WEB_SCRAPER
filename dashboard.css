@@ -256,6 +256,36 @@ h1 {
   font-weight: 600;
 }
 
+.district-control {
+  display: inline-flex;
+  position: relative;
+}
+
+.district-control .district-filter { padding-right: 34px; }
+
+.district-remove {
+  position: absolute;
+  top: 50%;
+  right: 7px;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  transform: translateY(-50%);
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #9b2c2c;
+  cursor: pointer;
+  font-family: inherit;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 22px;
+}
+
+.district-remove:hover { background: #fee2e2; color: #b42318; }
+.district-filter.active + .district-remove { color: #fff; }
+.district-filter.active + .district-remove:hover { background: rgba(255, 255, 255, .2); }
+
 .district-filter:hover,
 .district-filter.active {
   border-color: var(--primary);
