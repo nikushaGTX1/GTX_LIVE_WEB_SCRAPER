@@ -105,6 +105,19 @@ function markExcludedDescriptions(data) {
   return count;
 }
 
+function restoreAcceptedDistrictRemovals(data) {
+  let restored = 0;
+  for (const item of Object.values(data)) {
+    if (item._review_status !== 'accepted' || !item._excluded || !/^District removed by /i.test(item._excluded_reason || '')) continue;
+    delete item._excluded;
+    delete item._excluded_reason;
+    delete item._excluded_at;
+    item._baseline = false;
+    restored += 1;
+  }
+  return restored;
+}
+
 function match(pattern, text, group = 1) {
   const found = String(text ?? '').match(pattern);
   return found ? clean(found[group]) : '';
@@ -718,10 +731,16 @@ function startWebServer() {
         { data: liveSsData || loadSsData(), save: data => saveData(data, SS_DATA_PATH, SS_CSV_PATH) }
       ];
       let removed = 0;
+      let preserved = 0;
       for (const source of sources) {
         let changed = false;
         for (const item of Object.values(source.data)) {
-          if (clean(item.district).toLocaleLowerCase('en-US') !== normalizedDistrict || item._excluded) continue;
+          if (clean(item.district).toLocaleLowerCase('en-US') !== normalizedDistrict) continue;
+          if (item._review_status === 'accepted') {
+            preserved += 1;
+            continue;
+          }
+          if (item._excluded) continue;
           item._excluded = true;
           item._excluded_reason = `District removed by ${viewer.email}`;
           item._excluded_at = new Date().toISOString();
@@ -731,7 +750,7 @@ function startWebServer() {
         if (changed) source.save(source.data);
       }
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-      response.end(JSON.stringify({ ok: true, district, removed }));
+      response.end(JSON.stringify({ ok: true, district, removed, preserved }));
       return;
     }
     if (pathname === '/api/apartments/import-word' && request.method === 'POST') {
@@ -2024,10 +2043,12 @@ async function main() {
   liveMyHomeData = data;
   liveSsData = ssData;
   const state = loadState();
+  const restoredAccepted = restoreAcceptedDistrictRemovals(data) + restoreAcceptedDistrictRemovals(ssData);
   const excludedMyHome = markExcludedDescriptions(data);
   const excludedSs = markExcludedDescriptions(ssData);
   const clearedStreetErrors = clearLegacyStreetUploadErrors(data) + clearLegacyStreetUploadErrors(ssData);
   const clearedStreetData = clearLegacyStreetData(data) + clearLegacyStreetData(ssData);
+  if (restoredAccepted) console.log(`Restored ${restoredAccepted} accepted apartment(s) hidden by earlier district removal.`);
   try {
     const named = await hydrateAssignedAgentNames(data) + await hydrateAssignedAgentNames(ssData);
     if (named) console.log(`Resolved display names for ${named} assigned apartment(s).`);

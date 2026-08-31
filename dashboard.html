@@ -279,7 +279,7 @@
           document.querySelector(`tr.comment-row[data-comment-for="${row.dataset.apartmentId}"]`)?.remove();
           row.remove();
         });
-        alert(`Removed ${result.removed} apartment(s) from ${district}.`);
+        alert(`Removed ${result.removed} waiting apartment(s) from ${district}.${result.preserved ? ` Kept ${result.preserved} in Ready For Upload.` : ''}`);
         location.href = '/';
       } catch (error) {
         button.disabled = false;
