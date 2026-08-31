@@ -370,7 +370,11 @@ tbody tr:hover .review-cell { background: #f7fbff; }
   grid-template-columns: minmax(240px, 1fr) auto;
   align-items: end;
   gap: 7px;
-  width: 100%;
+  position: sticky;
+  left: 14px;
+  width: min(720px, calc(100vw - 64px));
+  max-width: 100%;
+  box-sizing: border-box;
   padding: 10px;
   border: 1px solid #bce5ce;
   border-radius: 10px;

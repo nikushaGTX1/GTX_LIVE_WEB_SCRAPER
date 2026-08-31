@@ -518,9 +518,9 @@ function publicWatcherConfig(viewer = { role: 'admin' }) {
     ? [...Object.values(readJsonFile(DATA_PATH)), ...Object.values(readJsonFile(SS_DATA_PATH))]
     : [];
   const pendingAssignments = viewer.role === 'admin'
-    ? savedApartments.filter(item => !item._baseline && !item._excluded && !item._api_uploaded && !hasExcludedDescription(item.description)).length
+    ? savedApartments.filter(item => !item._baseline && !item._excluded && !item.assigned_agent_id && !hasExcludedDescription(item.description)).length
     : 0;
-  const assignmentError = savedApartments.find(item => item._api_error)?._api_error || null;
+  const assignmentError = savedApartments.find(item => item._assignment_error)?._assignment_error || null;
   return {
     enabled: watcherRuntime.enabled,
     pages: watcherRuntime.pages,
@@ -1470,6 +1470,27 @@ async function hydrateAssignedAgentNames(data) {
   return updated;
 }
 
+async function assignPendingApartments(data, state, dataPath = DATA_PATH, csvPath = CSV_PATH) {
+  if (!process.env.WEBSITE_API_EMAIL || !process.env.WEBSITE_API_PASSWORD) return 0;
+  const pending = Object.values(data)
+    .filter(item => !item._baseline && !item._excluded && !item.assigned_agent_id && !hasExcludedDescription(item.description))
+    .sort((a, b) => String(a.first_seen).localeCompare(String(b.first_seen)));
+  if (!pending.length) return 0;
+  const agents = await getDistributionAgents();
+  for (const item of pending) {
+    const index = Number(state.api_assignment_index || 0) % agents.length;
+    const agent = agents[index];
+    item.assigned_agent_id = agent.id;
+    item.assigned_agent_name = agentDisplayName(agent);
+    item._assigned_at = new Date().toISOString();
+    delete item._assignment_error;
+    state.api_assignment_index = Number(state.api_assignment_index || 0) + 1;
+  }
+  saveData(data, dataPath, csvPath);
+  saveState(state);
+  return pending.length;
+}
+
 async function hydrateListingUploadHistory() {
   if (!process.env.WEBSITE_API_EMAIL || !process.env.WEBSITE_API_PASSWORD) return;
   if (Date.now() - dashboardUploadsRefreshedAt < 30_000) return;
@@ -1590,7 +1611,8 @@ async function uploadApartmentToWebsite(item, agentId) {
 async function syncPendingWebsiteApartments(data, state, onlyApartmentId = null, dataPath = DATA_PATH, csvPath = CSV_PATH) {
   // Scraped listings belong only to this scraper's private dataset. They must
   // never be published into Velven's customer-facing Apartments collection.
-  return 0;
+  // Agent assignment is local and remains valid independently of publishing.
+  return assignPendingApartments(data, state, dataPath, csvPath);
 
   /* Legacy publishing implementation retained temporarily for data migration
      reference. It is intentionally unreachable. */
@@ -1897,8 +1919,11 @@ async function main() {
   try {
     const named = await hydrateAssignedAgentNames(data) + await hydrateAssignedAgentNames(ssData);
     if (named) console.log(`Resolved display names for ${named} assigned apartment(s).`);
+    const assigned = await assignPendingApartments(data, state) +
+      await assignPendingApartments(ssData, state, SS_DATA_PATH, SS_CSV_PATH);
+    if (assigned) console.log(`Assigned ${assigned} pending apartment(s) in round-robin order.`);
   } catch (error) {
-    console.error(`Could not resolve existing agent display names: ${error.message}`);
+    console.error(`Could not resolve or assign apartment agents: ${error.message}`);
   }
   saveData(data);
   saveData(ssData, SS_DATA_PATH, SS_CSV_PATH);
