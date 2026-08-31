@@ -32,6 +32,8 @@
       <a href="/" data-view="all">All apartments</a>
       <a href="/?view=accepted" data-view="accepted">✓ Ready For Upload</a>
       <a href="/?view=owners" data-view="owners">Owners</a>
+      <input id="word-apartments-file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
+      <button id="import-word-apartments" type="button">Import Word links</button>
       <button id="copy-accepted-links" type="button" data-management-only>Copy accepted links</button>
     </nav>
 
@@ -87,6 +89,7 @@
     </section>
   </main>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
   <script>
     // Keep the editable template presentable when it is opened directly.
     // main.js replaces these markers with live data in live-results.html.
@@ -112,6 +115,7 @@
       document.getElementById('refresh-status').textContent = 'Your private owner database';
       document.querySelector('.listing-count span').textContent = 'owners';
       document.getElementById('copy-accepted-links').hidden = true;
+      document.getElementById('import-word-apartments').hidden = true;
     }
     document.getElementById('copy-accepted-links').addEventListener('click', async event => {
       const button = event.currentTarget;
@@ -169,6 +173,7 @@
       document.querySelectorAll('.district-remove').forEach(button => { button.hidden = !config.canAdmin; });
       managementNav.hidden = false;
       managementNav.querySelectorAll('[data-management-only]').forEach(item => { item.hidden = !config.canManage; });
+      document.getElementById('import-word-apartments').hidden = !config.canAdmin || managementNav.dataset.currentView !== 'all';
       const assignment = document.getElementById('assignment-status');
       assignment.textContent = config.assignment?.enabled
         ? `Round-robin assignment enabled · ${config.assignment.pending} pending agent assignments`
@@ -268,6 +273,47 @@
         location.reload();
       } catch (error) {
         button.disabled = false;
+        alert(error.message);
+      }
+    });
+    const wordApartmentsFile = document.getElementById('word-apartments-file');
+    document.getElementById('import-word-apartments').addEventListener('click', () => {
+      wordApartmentsFile.value = '';
+      wordApartmentsFile.click();
+    });
+    wordApartmentsFile.addEventListener('change', async () => {
+      const file = wordApartmentsFile.files[0];
+      if (!file) return;
+      try {
+        if (!window.mammoth) throw new Error('Word reader could not load. Check your internet connection and try again.');
+        const converted = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
+        const parsed = new DOMParser().parseFromString(converted.value, 'text/html');
+        const tableRows = [...parsed.querySelectorAll('table')].flatMap(table => {
+          const tableRows = [...table.querySelectorAll('tr')];
+          if (tableRows.length < 2) return [];
+          const headers = [...tableRows[0].querySelectorAll('th, td')].map(cell => cell.textContent.trim());
+          return tableRows.slice(1).map(row => Object.fromEntries(
+            [...row.querySelectorAll('th, td')].map((cell, index) => [headers[index] || `column_${index + 1}`, cell.textContent.trim()])
+          ));
+        });
+        const linkedUrls = [...parsed.querySelectorAll('a[href]')].map(link => link.href);
+        const textUrls = parsed.body.textContent.match(/https?:\/\/[^\s<]+/gi) || [];
+        const urls = [...new Set([...linkedUrls, ...textUrls]
+          .map(url => url.replace(/[),.;]+$/, ''))
+          .filter(url => /^https?:\/\/(?:www\.)?myhome\.ge\//i.test(url)))];
+        const tableUrls = new Set(tableRows.map(row => row.url || row.URL || row.link || row.Link).filter(Boolean));
+        const rows = [...tableRows, ...urls.filter(url => !tableUrls.has(url)).map(url => ({ url }))];
+        if (!rows.length) throw new Error('No MyHome links were found in the Word document.');
+        const response = await fetch('/api/apartments/import-word', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ rows })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Could not import Word apartments');
+        alert(`Imported ${result.imported} apartment link(s) from Word${result.duplicates ? `; skipped ${result.duplicates} already saved` : ''}${result.excluded ? `; excluded ${result.excluded} by description filters` : ''}${result.detailErrors ? `; ${result.detailErrors} link(s) need detail refresh` : ''}.`);
+        location.href = '/';
+      } catch (error) {
         alert(error.message);
       }
     });

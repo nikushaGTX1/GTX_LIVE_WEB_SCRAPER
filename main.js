@@ -722,6 +722,91 @@ function startWebServer() {
       response.end(JSON.stringify({ ok: true, district, removed }));
       return;
     }
+    if (pathname === '/api/apartments/import-word' && request.method === 'POST') {
+      if (viewer.role !== 'admin') {
+        response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: 'Admin access is required to import Word apartments' }));
+        return;
+      }
+      try {
+        const body = await readRequestJson(request);
+        if (!Array.isArray(body.rows) || !body.rows.length) throw new Error('The Word document has no apartment links');
+        if (body.rows.length > 5000) throw new Error('A Word import is limited to 5,000 apartments');
+        const aliases = {
+          id: 'apartment_id', apartmentid: 'apartment_id', apartment_id: 'apartment_id',
+          district: 'district', title: 'title', phone: 'phone', telephone: 'phone',
+          price: 'price', rooms: 'rooms', bedrooms: 'bedrooms', area: 'area_m2',
+          aream2: 'area_m2', area_m2: 'area_m2', floor: 'floor', totalfloors: 'total_floors',
+          total_floors: 'total_floors', description: 'description', comment: 'description',
+          url: 'url', link: 'url'
+        };
+        const data = liveMyHomeData || loadData();
+        let imported = 0;
+        let excluded = 0;
+        let duplicates = 0;
+        let detailErrors = 0;
+        for (let rowIndex = 0; rowIndex < body.rows.length; rowIndex += 1) {
+          const input = body.rows[rowIndex];
+          if (!input || typeof input !== 'object' || Array.isArray(input)) continue;
+          const values = {};
+          for (const [heading, value] of Object.entries(input)) {
+            const key = clean(heading).toLowerCase().replace(/[^a-z0-9_]+/g, '');
+            if (aliases[key]) values[aliases[key]] = clean(value);
+          }
+          if (!Object.values(values).some(Boolean)) continue;
+          if (values.url) values.url = validateMyHomeUrl(values.url);
+          const urlId = String(values.url || '').match(/(?:^|\D)(\d{5,})(?:\D|$)/)?.[1];
+          let apartmentId = clean(values.apartment_id).replace(/\D/g, '') || urlId || String(Date.now() + rowIndex);
+          if (data[apartmentId]) {
+            duplicates += 1;
+            continue;
+          }
+          const urlSlug = values.url ? new URL(values.url).pathname.split('/').filter(Boolean).at(-1) || '' : '';
+          let item = {
+            apartment_id: apartmentId,
+            source: values.url ? 'MyHome' : 'Word',
+            district: values.district || (values.url ? districtFromListingUrl(values.url) : 'Other'),
+            title: values.title || clean(urlSlug.replace(new RegExp(`-${apartmentId}$`), '').replace(/-/g, ' ')) || `Word apartment ${apartmentId}`,
+            phone: values.phone || '', price: values.price || '', rooms: values.rooms || '',
+            bedrooms: values.bedrooms || '', area_m2: values.area_m2 || '', floor: values.floor || '',
+            total_floors: values.total_floors || '', description: (values.description || '').slice(0, 2000),
+            url: values.url || '', first_seen: new Date().toISOString(), _baseline: false
+          };
+          if (values.url) {
+            try {
+              const detail = await getMyHomeStatement(apartmentId);
+              const phoneInfo = myHomePhoneInfo(detail);
+              item = myHomeApartment(detail, apartmentId, phoneInfo.phone, item.first_seen, item.district);
+              item._imported_from_word = true;
+            } catch (error) {
+              item._word_import_error = error.message;
+              detailErrors += 1;
+            }
+          }
+          if (hasExcludedDescription(item.description)) {
+            item._excluded = true;
+            item._excluded_reason = 'Word description matched an exclusion phrase';
+            excluded += 1;
+          }
+          data[apartmentId] = item;
+          imported += 1;
+        }
+        if (!imported && duplicates) {
+          response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+          response.end(JSON.stringify({ ok: true, imported, excluded, duplicates, detailErrors }));
+          return;
+        }
+        if (!imported) throw new Error('No usable MyHome links were found in the Word document');
+        saveData(data);
+        await assignPendingApartments(data, loadState());
+        response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ ok: true, imported, excluded, duplicates, detailErrors }));
+      } catch (error) {
+        response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: error.message }));
+      }
+      return;
+    }
     if (pathname === '/api/owners' && request.method === 'GET') {
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       response.end(JSON.stringify(ownersData(viewer)));
@@ -1468,6 +1553,15 @@ async function hydrateAssignedAgentNames(data) {
     }
   }
   return updated;
+}
+
+function districtFromListingUrl(value) {
+  const slug = new URL(value).pathname.toLowerCase();
+  if (slug.includes('didi-dighomi')) return 'Didi Dighomi';
+  if (slug.includes('saburtalo')) return 'Saburtalo';
+  if (slug.includes('vake')) return 'Vake';
+  if (slug.includes('digomi')) return 'Digomi';
+  return 'Other';
 }
 
 async function assignPendingApartments(data, state, dataPath = DATA_PATH, csvPath = CSV_PATH) {

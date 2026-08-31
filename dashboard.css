@@ -101,7 +101,8 @@ h1 {
 .management-nav[hidden] { display: none; }
 .management-nav a { padding: 9px 13px; border: 1px solid var(--line); border-radius: 10px; background: #fff; color: var(--muted); font-size: 13px; font-weight: 700; }
 .management-nav a.active { border-color: #20a464; background: #e5f7ed; color: #087443; }
-.management-nav button { margin-left: auto; padding: 9px 13px; border: 0; border-radius: 10px; background: #172033; color: #fff; cursor: pointer; font: inherit; font-size: 13px; font-weight: 700; }
+.management-nav button { padding: 9px 13px; border: 0; border-radius: 10px; background: #172033; color: #fff; cursor: pointer; font: inherit; font-size: 13px; font-weight: 700; }
+#import-word-apartments { margin-left: auto; background: #0866d9; }
 .management-nav [hidden] { display: none; }
 
 .admin-controls {
