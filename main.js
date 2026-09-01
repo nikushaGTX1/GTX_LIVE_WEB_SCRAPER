@@ -72,6 +72,33 @@ function clean(value) {
   return String(value ?? '').replace(/\s+/g, ' ').trim();
 }
 
+const DASHBOARD_TIME_ZONE = process.env.DASHBOARD_TIME_ZONE || 'Asia/Tbilisi';
+
+function calendarDateKey(value, timeZone = DASHBOARD_TIME_ZONE) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '';
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone, year: 'numeric', month: '2-digit', day: '2-digit'
+  }).formatToParts(date);
+  const part = type => parts.find(item => item.type === type)?.value || '';
+  return `${part('year')}-${part('month')}-${part('day')}`;
+}
+
+function dashboardDateTime(value) {
+  const date = new Date(value);
+  if (!Number.isFinite(date.getTime())) return '—';
+  return new Intl.DateTimeFormat('en-GB', {
+    timeZone: DASHBOARD_TIME_ZONE, day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit'
+  }).format(date);
+}
+
+function dateKeyDaysAgo(daysAgo) {
+  const date = new Date();
+  date.setUTCDate(date.getUTCDate() - daysAgo);
+  return calendarDateKey(date);
+}
+
 function clearLegacyStreetUploadErrors(data) {
   let changed = 0;
   for (const item of Object.values(data)) {
@@ -396,6 +423,7 @@ function buildDashboard(viewer = null, view = 'all') {
       </td>
       <td><span class="source ${item.source === 'SS.ge' ? 'ss' : ''}">${html(item.source)}</span></td>
       <td>${html(item.apartment_id)}</td>
+      <td title="${html(item.first_seen || '')}">${html(dashboardDateTime(item.first_seen))}</td>
       <td>${html(item.district || 'Other')}</td>
       <td>${html(item.assigned_agent_name || item.assigned_agent_id || 'Pending')}</td>
       <td>${html(item.rooms || '—')}</td>
@@ -409,7 +437,7 @@ function buildDashboard(viewer = null, view = 'all') {
       ${showManagementComments ? `<td class="accepted-agent"><strong>${html(item._reviewed_by || 'Unknown agent')}</strong><small>${item._reviewed_at ? html(item._reviewed_at) : ''}</small></td><td class="management-comment"><div class="accepted-comment-edit"><textarea class="accepted-comment-editor" maxlength="2000" aria-label="Apartment comment">${html(item._review_comment || '')}</textarea><button class="update-comment" type="button">Save comment</button></div></td>` : ''}
     </tr>`;
     if (view === 'accepted') return apartmentRow;
-    const columnCount = showManagementComments ? 15 : 13;
+    const columnCount = showManagementComments ? 16 : 14;
     return `${apartmentRow}<tr class="comment-row" data-apartment-id="${html(item.apartment_id)}" data-comment-for="${html(item.apartment_id)}" hidden>
       <td colspan="${columnCount}">
         <div class="comment-dropdown">
@@ -432,7 +460,7 @@ function buildDashboard(viewer = null, view = 'all') {
     ? `<div class="table-search" role="search"><label for="table-search-input">Search ready apartments</label><input id="table-search-input" type="search" placeholder="Search ID, district, agent, phone..." autocomplete="off" data-search-table=".results-table" data-search-rows="tbody .apartment-row"><span id="table-search-status" aria-live="polite"></span></div>`
     : '';
   const content = view === 'owners' ? buildOwnersContent(viewer) : combined.length
-    ? `${acceptedSearch}<table class="results-table"><thead><tr><th class="review-heading">Review</th><th>Source</th><th>ID</th><th>District</th><th>Assigned agent</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th><th>Website</th>${showManagementComments ? '<th>Accepted by</th><th>Comment</th>' : ''}</tr></thead><tbody>${rows}</tbody></table>`
+    ? `${acceptedSearch}<table class="results-table"><thead><tr><th class="review-heading">Review</th><th>Source</th><th>ID</th><th>Received</th><th>District</th><th>Assigned agent</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th><th>Website</th>${showManagementComments ? '<th>Accepted by</th><th>Comment</th>' : ''}</tr></thead><tbody>${rows}</tbody></table>`
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
     .replace('{{LISTING_COUNT}}', String(view === 'owners' ? ownersData(viewer).rows.length : combined.length))
@@ -774,8 +802,22 @@ function startWebServer() {
         response.end(JSON.stringify({ error: 'Management access is required' }));
         return;
       }
+      const daysAgo = Number(requestUrl.searchParams.get('daysAgo') ?? 0);
+      if (![0, 1, 3].includes(daysAgo)) {
+        response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: 'daysAgo must be 0, 1, or 3' }));
+        return;
+      }
+      const targetDate = dateKeyDaysAgo(daysAgo);
+      const seenListings = new Set();
       const accepted = [...Object.values(liveMyHomeData || {}), ...Object.values(liveSsData || {})]
-        .filter(item => item._review_status === 'accepted' && item.url)
+        .filter(item => item._review_status === 'accepted' && item.url && calendarDateKey(item.first_seen) === targetDate)
+        .filter(item => {
+          const key = String(item.url).split(/[?#]/)[0].replace(/\/$/, '').toLowerCase() || `${item.source || ''}:${item.apartment_id}`;
+          if (seenListings.has(key)) return false;
+          seenListings.add(key);
+          return true;
+        })
         .sort((a, b) => String(a._reviewed_at || '').localeCompare(String(b._reviewed_at || '')));
       const entries = accepted.map(item => {
         const apartmentId = Number(item._website_api_apartment_id);
@@ -785,7 +827,7 @@ function startWebServer() {
         return { link, comment: item._review_comment || '', apiApartmentId: Number.isInteger(apartmentId) ? apartmentId : null };
       });
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-      response.end(JSON.stringify({ entries }));
+      response.end(JSON.stringify({ entries, daysAgo, date: targetDate }));
       return;
     }
     if (pathname === '/api/apartments' && request.method === 'DELETE') {

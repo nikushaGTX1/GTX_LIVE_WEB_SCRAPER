@@ -57,8 +57,10 @@ Admins and managers have an `Accepted apartments` management view at
 `/?view=accepted`. Clicking ✓ immediately marks the apartment accepted. The Accepted apartments view is a strict accepted-only subset, while All apartments continues to show every non-rejected scraped apartment. The queue includes accepted apartments across every agent plus the saved
 comment, reviewer email, and review time. Managers are restricted to this accepted
 queue; admins can switch between all and accepted views.
-The management navigation includes `Copy accepted links`, which copies every
-accepted MyHome/SS.ge URL together with its saved comment. The accepted queue
+The management navigation includes separate copy buttons for apartments received
+today, yesterday, and exactly three days ago. Each non-overlapping group copies
+accepted MyHome/SS.ge URLs together with their saved comments. The apartment's
+received date (`first_seen`) is visible in both apartment views. The accepted queue
 shows comments and reviewer details directly to admins/managers, and clipboard
 output uses a `link` line followed by `Comment: ...` for each apartment.
 The Stop button safely ends an active import after its current apartment, retains
