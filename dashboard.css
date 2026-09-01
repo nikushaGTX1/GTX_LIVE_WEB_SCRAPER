@@ -444,6 +444,28 @@ a:hover { text-decoration: underline; }
 .apartment-row td:nth-child(2) { min-width: 120px; }
 .empty { padding: 64px 24px; color: var(--muted); text-align: center; }
 
+.table-search {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 20px;
+  border-bottom: 1px solid var(--line);
+  background: #f8fafc;
+}
+.table-search label { font-size: 13px; font-weight: 700; white-space: nowrap; }
+.table-search input {
+  width: min(440px, 100%);
+  min-height: 41px;
+  padding: 9px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--text);
+  font: inherit;
+}
+.table-search input:focus { outline: 2px solid var(--primary); outline-offset: 1px; }
+.table-search span { color: var(--muted); font-size: 12px; white-space: nowrap; }
+
 .owners-panel { min-width: 0; }
 .owners-toolbar {
   display: flex;
@@ -487,6 +509,8 @@ a:hover { text-decoration: underline; }
   .owners-toolbar { align-items: flex-start; flex-direction: column; }
   .owners-actions { width: 100%; }
   .owners-actions button { flex: 1; }
+  .table-search { align-items: stretch; flex-direction: column; }
+  .table-search input { width: 100%; }
 }
 
 @media (min-width: 641px) and (max-width: 1000px) {

@@ -449,6 +449,29 @@
       setTimeout(() => cell.classList.remove('saved'), 700);
     };
     document.querySelectorAll('.owner-cell').forEach(cell => { cell.dataset.savedValue = cell.textContent.trim(); });
+    const tableSearchInput = document.getElementById('table-search-input');
+    if (tableSearchInput) {
+      const table = document.querySelector(tableSearchInput.dataset.searchTable);
+      const searchableRows = [...(table?.querySelectorAll(tableSearchInput.dataset.searchRows) || [])];
+      const searchStatus = document.getElementById('table-search-status');
+      const applyTableSearch = () => {
+        const query = tableSearchInput.value.trim().toLocaleLowerCase();
+        let visible = 0;
+        searchableRows.forEach(row => {
+          const matches = !query || row.textContent.toLocaleLowerCase().includes(query);
+          row.hidden = !matches;
+          if (matches) visible += 1;
+        });
+        searchStatus.textContent = query ? `${visible} of ${searchableRows.length} shown` : `${searchableRows.length} total`;
+      };
+      tableSearchInput.addEventListener('input', applyTableSearch);
+      tableSearchInput.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+        tableSearchInput.value = '';
+        applyTableSearch();
+      });
+      applyTableSearch();
+    }
     document.querySelector('.owners-table')?.addEventListener('focusout', event => {
       const cell = event.target.closest('.owner-cell');
       if (cell) saveOwnerCell(cell).catch(error => alert(error.message));

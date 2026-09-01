@@ -354,6 +354,11 @@ function buildOwnersContent(viewer) {
         <button id="owners-remove-all" type="button">Remove all</button>
       </div>
     </div>
+    <div class="table-search" role="search">
+      <label for="table-search-input">Search owners</label>
+      <input id="table-search-input" type="search" placeholder="Search any owner field..." autocomplete="off" data-search-table=".owners-table" data-search-rows="tbody tr">
+      <span id="table-search-status" aria-live="polite"></span>
+    </div>
     <div class="owners-table-wrap"><table class="owners-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>
   </section>`;
 }
@@ -423,8 +428,11 @@ function buildDashboard(viewer = null, view = 'all') {
   if (!fs.existsSync(DASHBOARD_TEMPLATE_PATH)) {
     throw new Error(`Dashboard template is missing: ${DASHBOARD_TEMPLATE_PATH}`);
   }
+  const acceptedSearch = view === 'accepted' || viewer?.role === 'manager'
+    ? `<div class="table-search" role="search"><label for="table-search-input">Search ready apartments</label><input id="table-search-input" type="search" placeholder="Search ID, district, agent, phone..." autocomplete="off" data-search-table=".results-table" data-search-rows="tbody .apartment-row"><span id="table-search-status" aria-live="polite"></span></div>`
+    : '';
   const content = view === 'owners' ? buildOwnersContent(viewer) : combined.length
-    ? `<table><thead><tr><th class="review-heading">Review</th><th>Source</th><th>ID</th><th>District</th><th>Assigned agent</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th><th>Website</th>${showManagementComments ? '<th>Accepted by</th><th>Comment</th>' : ''}</tr></thead><tbody>${rows}</tbody></table>`
+    ? `${acceptedSearch}<table class="results-table"><thead><tr><th class="review-heading">Review</th><th>Source</th><th>ID</th><th>District</th><th>Assigned agent</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th><th>Website</th>${showManagementComments ? '<th>Accepted by</th><th>Comment</th>' : ''}</tr></thead><tbody>${rows}</tbody></table>`
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
     .replace('{{LISTING_COUNT}}', String(view === 'owners' ? ownersData(viewer).rows.length : combined.length))
