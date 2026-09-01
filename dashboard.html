@@ -35,7 +35,7 @@
       <a href="/?view=owners" data-view="owners">Owners</a>
       <input id="word-apartments-file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
       <button id="import-word-apartments" type="button">Import Word links</button>
-      <span class="copy-accepted-group" data-management-only aria-label="Copy ready apartment links by received date">
+      <span class="copy-accepted-group" data-ready-copy aria-label="Copy ready apartment links by received date">
         <button class="copy-accepted-links" type="button" data-days-ago="0">Copy today</button>
         <button class="copy-accepted-links" type="button" data-days-ago="1">Copy yesterday</button>
         <button class="copy-accepted-links" type="button" data-days-ago="3">Copy 3 days ago</button>
@@ -187,6 +187,9 @@
       managementNav.hidden = false;
       managementNav.querySelectorAll('[data-management-only]').forEach(item => {
         item.hidden = ownersView || !config.canManage || managementNav.dataset.currentView !== 'accepted';
+      });
+      managementNav.querySelectorAll('[data-ready-copy]').forEach(item => {
+        item.hidden = ownersView || managementNav.dataset.currentView !== 'accepted';
       });
       document.getElementById('import-word-apartments').hidden = !config.canAdmin || managementNav.dataset.currentView !== 'all';
       const assignment = document.getElementById('assignment-status');

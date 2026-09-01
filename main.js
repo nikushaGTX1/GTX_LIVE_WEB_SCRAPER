@@ -797,11 +797,6 @@ function startWebServer() {
       return;
     }
     if (pathname === '/api/apartments/accepted-links' && request.method === 'GET') {
-      if (!['admin', 'manager'].includes(viewer.role)) {
-        response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
-        response.end(JSON.stringify({ error: 'Management access is required' }));
-        return;
-      }
       const daysAgo = Number(requestUrl.searchParams.get('daysAgo') ?? 0);
       if (![0, 1, 3].includes(daysAgo)) {
         response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
@@ -812,6 +807,7 @@ function startWebServer() {
       const seenListings = new Set();
       const accepted = [...Object.values(liveMyHomeData || {}), ...Object.values(liveSsData || {})]
         .filter(item => item._review_status === 'accepted' && item.url && calendarDateKey(item.first_seen) === targetDate)
+        .filter(item => viewer.role !== 'agent' || String(item.assigned_agent_id || '') === String(viewer.agentId || ''))
         .filter(item => {
           const key = String(item.url).split(/[?#]/)[0].replace(/\/$/, '').toLowerCase() || `${item.source || ''}:${item.apartment_id}`;
           if (seenListings.has(key)) return false;

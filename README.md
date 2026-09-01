@@ -60,7 +60,9 @@ queue; admins can switch between all and accepted views.
 The management navigation includes separate copy buttons for apartments received
 today, yesterday, and exactly three days ago. Each non-overlapping group copies
 accepted MyHome/SS.ge URLs together with their saved comments. The apartment's
-received date (`first_seen`) is visible in both apartment views. The accepted queue
+received date (`first_seen`) is visible in both apartment views. These buttons are
+available to every role; agents copy only their own assigned apartments, while
+admins and managers copy the complete matching group. The accepted queue
 shows comments and reviewer details directly to admins/managers, and clipboard
 output uses a `link` line followed by `Comment: ...` for each apartment.
 The Stop button safely ends an active import after its current apartment, retains
