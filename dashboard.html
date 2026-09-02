@@ -32,6 +32,7 @@
     <nav class="management-nav" id="management-nav" data-current-view="{{CURRENT_VIEW}}" hidden aria-label="Management views">
       <a href="/" data-view="all">All apartments</a>
       <a href="/?view=accepted" data-view="accepted">✓ Ready For Upload</a>
+      <a href="/?view=team" data-view="team" data-management-role>Team profiles</a>
       <a href="/?view=owners" data-view="owners">Owners</a>
       <input id="word-apartments-file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
       <button id="import-word-apartments" type="button">Import Word links</button>
@@ -116,11 +117,12 @@
     if (managementNav.dataset.currentView.includes('{{CURRENT_VIEW}}')) managementNav.dataset.currentView = 'all';
     managementNav.querySelectorAll('a').forEach(link => link.classList.toggle('active', link.dataset.view === managementNav.dataset.currentView));
     const ownersView = managementNav.dataset.currentView === 'owners';
-    if (ownersView) {
+    const teamView = managementNav.dataset.currentView === 'team';
+    if (ownersView || teamView) {
       document.getElementById('admin-controls').hidden = true;
       document.querySelector('.district-filters').hidden = true;
-      document.getElementById('refresh-status').textContent = 'Your private owner database';
-      document.querySelector('.listing-count span').textContent = 'owners';
+      document.getElementById('refresh-status').textContent = ownersView ? 'Your private owner database' : 'Every agent and their apartment queue';
+      document.querySelector('.listing-count span').textContent = ownersView ? 'owners' : 'profiles';
       document.querySelector('.copy-accepted-group').hidden = true;
       document.getElementById('import-word-apartments').hidden = true;
     }
@@ -182,9 +184,10 @@
 
     const showWatcherConfig = config => {
       watcherConfig = config;
-      document.getElementById('admin-controls').hidden = ownersView || !config.canAdmin;
+      document.getElementById('admin-controls').hidden = ownersView || teamView || !config.canAdmin;
       document.querySelectorAll('.district-remove').forEach(button => { button.hidden = !config.canAdmin; });
       managementNav.hidden = false;
+      managementNav.querySelectorAll('[data-management-role]').forEach(item => { item.hidden = !config.canManage; });
       managementNav.querySelectorAll('[data-management-only]').forEach(item => {
         item.hidden = ownersView || !config.canManage || managementNav.dataset.currentView !== 'accepted';
       });
@@ -200,8 +203,8 @@
       assignment.classList.toggle('warning', !config.assignment?.enabled || config.assignment.pending > 0);
       toggle.textContent = config.enabled ? 'Stop scraper' : 'Start scraper';
       toggle.classList.toggle('running', config.enabled);
-      document.getElementById('refresh-status').textContent = ownersView
-        ? 'Your private owner database'
+      document.getElementById('refresh-status').textContent = ownersView || teamView
+        ? (ownersView ? 'Your private owner database' : 'Every agent and their apartment queue')
         : (config.enabled ? 'Auto-refreshes every 3 seconds' : 'Dashboard refresh paused');
       document.getElementById('watcher-pages').value = config.pages;
       document.getElementById('watcher-interval').value = config.interval;
@@ -521,6 +524,26 @@
       if (!response.ok) throw new Error(result.error || 'Could not save apartment review');
       return result;
     };
+    document.querySelectorAll('.agent-reassign').forEach(select => { select.dataset.savedValue = select.value; });
+    document.querySelector('.results-table')?.addEventListener('change', async event => {
+      const select = event.target.closest('.agent-reassign');
+      if (!select) return;
+      const row = select.closest('.apartment-row');
+      const previous = select.dataset.savedValue || '';
+      select.disabled = true;
+      reviewInteractionUntil = Date.now() + 5000;
+      try {
+        await saveReview(row, 'reassign', '', { agentId: select.value });
+        select.dataset.savedValue = select.value;
+        select.classList.add('saved');
+        setTimeout(() => select.classList.remove('saved'), 1200);
+      } catch (error) {
+        select.value = previous;
+        alert(error.message);
+      } finally {
+        select.disabled = false;
+      }
+    });
     document.getElementById('dashboard-content').addEventListener('click', async event => {
       const clickedRow = event.target.closest('tr[data-apartment-id]');
       if (!clickedRow) return;
@@ -599,7 +622,7 @@
     });
     setInterval(() => {
       const editingReview = document.activeElement.closest?.('.comment-row');
-      if (!ownersView && !wordImportInProgress && watcherConfig?.enabled && !editingReview && Date.now() > reviewInteractionUntil && !document.activeElement.closest?.('.admin-controls')) location.reload();
+      if (!ownersView && !teamView && !wordImportInProgress && watcherConfig?.enabled && !editingReview && Date.now() > reviewInteractionUntil && !document.activeElement.closest?.('.admin-controls')) location.reload();
     }, 3000);
   </script>
 </body>

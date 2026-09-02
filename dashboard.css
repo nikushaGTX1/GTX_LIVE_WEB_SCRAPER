@@ -500,6 +500,24 @@ a:hover { text-decoration: underline; }
 .owner-remove { padding: 7px 10px; border: 1px solid #f2b8b5; border-radius: 8px; background: #fff5f5; color: #b42318; cursor: pointer; font: inherit; font-size: 12px; font-weight: 700; }
 .owner-remove:hover { background: #b42318; color: #fff; }
 .owner-remove:disabled { cursor: wait; opacity: .55; }
+.agent-reassign { min-width: 145px; max-width: 210px; padding: 7px 30px 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: #fff; color: var(--text); font: inherit; font-size: 12px; }
+.agent-reassign:focus { outline: 2px solid var(--primary); outline-offset: 1px; }
+.agent-reassign.saved { border-color: #20a464; background-color: #e5f7ed; }
+.profile-filter-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; padding: 12px 15px; border: 1px solid #b7dfca; border-radius: 12px; background: #eaf8f0; color: #174f35; }
+.profile-filter-banner a { font-size: 13px; font-weight: 800; color: #087443; }
+.team-panel { padding: 4px; }
+.team-heading { margin-bottom: 18px; }
+.team-heading h2 { margin: 2px 0 5px; }
+.team-heading p:last-child { margin: 0; color: var(--muted); }
+.agent-profile-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 14px; }
+.agent-profile-card { display: flex; align-items: center; gap: 13px; padding: 17px; border: 1px solid var(--line); border-radius: 14px; background: #fff; color: var(--text); box-shadow: 0 5px 16px rgba(23, 32, 51, .05); transition: transform .15s ease, border-color .15s ease; }
+.agent-profile-card:hover { transform: translateY(-2px); border-color: #83cba5; }
+.agent-avatar { display: grid; place-items: center; flex: 0 0 44px; height: 44px; border-radius: 50%; background: #172033; color: #fff; font-size: 18px; font-weight: 800; }
+.agent-profile-copy { min-width: 0; flex: 1; }
+.agent-profile-copy strong, .agent-profile-copy small, .agent-profile-total small { display: block; }
+.agent-profile-copy small { margin-top: 5px; color: var(--muted); font-size: 11px; }
+.agent-profile-total { text-align: center; font-size: 20px; font-weight: 800; color: #087443; }
+.agent-profile-total small { color: var(--muted); font-size: 9px; font-weight: 700; text-transform: uppercase; }
 
 @media (max-width: 640px) {
   .dashboard { padding: 22px 14px; }
