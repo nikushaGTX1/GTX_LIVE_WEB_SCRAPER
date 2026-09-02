@@ -324,6 +324,14 @@ function upsertOwnerRow(viewer, incoming) {
   if (created) {
     data.rows.unshift(incoming);
     rowIndex = 0;
+  } else {
+    // A single apartment can be published to MyHome first and SS.ge later (or
+    // in the opposite order). Each extension sync only supplies the ID for the
+    // platform that just finished, so retain saved values and fill/refresh the
+    // non-empty columns supplied by the latest sync.
+    data.rows[rowIndex] = OWNER_HEADERS.map((_, columnIndex) =>
+      incoming[columnIndex] || clean(data.rows[rowIndex][columnIndex])
+    );
   }
   fs.writeFileSync(ownersPathFor(viewer), JSON.stringify(data, null, 2), 'utf8');
   return { created, rowIndex, rowCount: data.rows.length };

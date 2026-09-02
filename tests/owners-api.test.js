@@ -13,11 +13,11 @@ test('dashboard API accepts Website API bearer tokens', () => {
   assert.match(source, /identity\/claims\/emailaddress/);
 });
 
-test('Owners endpoint keeps the first row submitted for a duplicate owner ID', () => {
+test('Owners endpoint merges later platform IDs into the same owner row', () => {
   assert.match(source, /pathname === '\/api\/owners\/upsert' && request\.method === 'POST'/);
   assert.match(source, /data\.rows\.findIndex\(row => clean\(row\[0\]\) === incoming\[0\]\)/);
   assert.match(source, /seenOwnerIds\.has\(ownerId\)/);
-  assert.doesNotMatch(source, /incoming\[columnIndex\] \|\| clean\(data\.rows\[rowIndex\]\[columnIndex\]\)/);
+  assert.match(source, /incoming\[columnIndex\] \|\| clean\(data\.rows\[rowIndex\]\[columnIndex\]\)/);
 });
 
 test('extension owner uploads feed the authenticated agent and central Administrator databases', () => {
