@@ -505,6 +505,11 @@ a:hover { text-decoration: underline; }
 .agent-reassign.saved { border-color: #20a464; background-color: #e5f7ed; }
 .profile-filter-banner { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 12px; padding: 12px 15px; border: 1px solid #b7dfca; border-radius: 12px; background: #eaf8f0; color: #174f35; }
 .profile-filter-banner a { font-size: 13px; font-weight: 800; color: #087443; }
+.bulk-transfer { display: flex; align-items: center; gap: 8px; margin-left: auto; }
+.bulk-transfer label { display: flex; align-items: center; gap: 7px; font-size: 12px; font-weight: 700; }
+.bulk-transfer select { min-width: 170px; padding: 7px 9px; border: 1px solid #9ccdb2; border-radius: 8px; background: #fff; font: inherit; }
+.bulk-transfer button { padding: 8px 11px; border: 0; border-radius: 8px; background: #087443; color: #fff; cursor: pointer; font: inherit; font-size: 12px; font-weight: 800; }
+.bulk-transfer button:disabled { cursor: wait; opacity: .6; }
 .team-panel { padding: 4px; }
 .team-heading { margin-bottom: 18px; }
 .team-heading h2 { margin: 2px 0 5px; }
@@ -520,6 +525,8 @@ a:hover { text-decoration: underline; }
 .agent-profile-total small { color: var(--muted); font-size: 9px; font-weight: 700; text-transform: uppercase; }
 
 @media (max-width: 640px) {
+  .profile-filter-banner, .bulk-transfer, .bulk-transfer label { align-items: stretch; flex-direction: column; }
+  .bulk-transfer { width: 100%; margin-left: 0; }
   .dashboard { padding: 22px 14px; }
   .dashboard-header { align-items: flex-start; flex-direction: column; gap: 14px; }
   .header-meta { width: 100%; flex-direction: column; }

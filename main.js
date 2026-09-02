@@ -400,15 +400,19 @@ function buildOwnersContent(viewer) {
 
 function managementAgents(items = []) {
   const agents = new Map();
+  const activeAgentIds = new Set(websiteApiAgents.map(agent => String(agent.id || '')));
+  for (const account of dashboardAccounts()) {
+    if (account.role === 'agent' && account.agentId) activeAgentIds.add(String(account.agentId));
+  }
   for (const agent of dashboardUploadAgents) {
-    if (agent.id) agents.set(String(agent.id), { id: String(agent.id), name: clean(agent.name) || String(agent.id) });
+    if (agent.id) agents.set(String(agent.id), { id: String(agent.id), name: clean(agent.name) || String(agent.id), assignable: activeAgentIds.has(String(agent.id)) });
   }
   for (const account of dashboardAccounts()) {
-    if (account.role === 'agent' && account.agentId) agents.set(String(account.agentId), { id: String(account.agentId), name: account.name || account.email || String(account.agentId) });
+    if (account.role === 'agent' && account.agentId) agents.set(String(account.agentId), { id: String(account.agentId), name: account.name || account.email || String(account.agentId), assignable: true });
   }
   for (const item of items) {
     const id = String(item.assigned_agent_id || '');
-    if (id && !agents.has(id)) agents.set(id, { id, name: clean(item.assigned_agent_name) || id });
+    if (id && !agents.has(id)) agents.set(id, { id, name: clean(item.assigned_agent_name) || id, assignable: activeAgentIds.has(id) });
   }
   return [...agents.values()].sort((left, right) => left.name.localeCompare(right.name));
 }
@@ -435,6 +439,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
   ].filter(item => !item._baseline && !item._excluded && item._review_status !== 'rejected' && !hasExcludedDescription(item.description))
     .sort((a, b) => String(b.first_seen).localeCompare(String(a.first_seen)));
   const agents = managementAgents(allVisible);
+  const assignableAgents = agents.filter(agent => agent.assignable);
   let combined = [...allVisible];
   if (viewer?.role === 'agent') {
     combined = combined.filter(item =>
@@ -455,7 +460,14 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
   const selectedAgent = agents.find(agent => agent.id === String(selectedAgentId));
   const showManagementComments = view === 'accepted' || Boolean(selectedAgentId && ['admin', 'manager'].includes(viewer?.role));
   const canReassign = ['admin', 'manager'].includes(viewer?.role);
-  const assignmentOptions = item => agents.map(agent => `<option value="${html(agent.id)}"${String(item.assigned_agent_id || '') === agent.id ? ' selected' : ''}>${html(agent.name)}</option>`).join('');
+  const assignmentOptions = item => {
+    const currentId = String(item.assigned_agent_id || '');
+    const current = agents.find(agent => agent.id === currentId);
+    const inactiveCurrent = currentId && !assignableAgents.some(agent => agent.id === currentId)
+      ? `<option value="${html(currentId)}" selected disabled>${html(current?.name || item.assigned_agent_name || currentId)} (inactive)</option>`
+      : '';
+    return inactiveCurrent + assignableAgents.map(agent => `<option value="${html(agent.id)}"${currentId === agent.id ? ' selected' : ''}>${html(agent.name)}</option>`).join('');
+  };
 
   const rows = combined.map(item => {
     const websiteStatus = item._api_uploaded
@@ -508,12 +520,17 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
   const acceptedSearch = view === 'accepted' || selectedAgentId
     ? `<div class="table-search" role="search"><label for="table-search-input">Search ready apartments</label><input id="table-search-input" type="search" placeholder="Search ID, district, agent, phone..." autocomplete="off" data-search-table=".results-table" data-search-rows="tbody .apartment-row"><span id="table-search-status" aria-live="polite"></span></div>`
     : '';
-  const profileBanner = selectedAgent ? `<div class="profile-filter-banner"><span>Showing <strong>${html(selectedAgent.name)}</strong>'s apartments</span><a href="/?view=${view === 'accepted' ? 'accepted' : 'all'}">Show everyone</a></div>` : '';
-  const content = view === 'owners' ? buildOwnersContent(viewer) : view === 'team' ? buildTeamContent(allVisible, agents) : combined.length
+  const bulkTargets = selectedAgent ? assignableAgents.filter(agent => agent.id !== selectedAgent.id) : [];
+  const profileBanner = selectedAgent ? `<div class="profile-filter-banner">
+    <span>Showing <strong>${html(selectedAgent.name)}</strong>'s apartments</span>
+    ${canReassign && bulkTargets.length ? `<div class="bulk-transfer"><label>Transfer all to <select id="bulk-transfer-agent"><option value="">Choose agent…</option>${bulkTargets.map(agent => `<option value="${html(agent.id)}">${html(agent.name)}</option>`).join('')}</select></label><button id="bulk-transfer-button" type="button" data-from-agent="${html(selectedAgent.id)}">Transfer all</button></div>` : ''}
+    <a href="/?view=${view === 'accepted' ? 'accepted' : 'all'}">Show everyone</a>
+  </div>` : '';
+  const content = view === 'owners' ? buildOwnersContent(viewer) : view === 'team' ? buildTeamContent(allVisible, assignableAgents) : combined.length
     ? `${profileBanner}${acceptedSearch}<table class="results-table"><thead><tr><th class="review-heading">Review</th><th>Source</th><th>ID</th><th>Received</th><th>District</th><th>Assigned agent</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th><th>Website</th>${showManagementComments ? '<th>Accepted by</th><th>Comment</th>' : ''}</tr></thead><tbody>${rows}</tbody></table>`
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
-    .replace('{{LISTING_COUNT}}', String(view === 'owners' ? ownersData(viewer).rows.length : view === 'team' ? agents.length : combined.length))
+    .replace('{{LISTING_COUNT}}', String(view === 'owners' ? ownersData(viewer).rows.length : view === 'team' ? assignableAgents.length : combined.length))
     .replace('{{LOGGED_IN_AS}}', html(viewer?.name || viewer?.email || process.env.DASHBOARD_DISPLAY_USER || process.env.WEBSITE_API_EMAIL || 'Local viewer'))
     .replace('{{LOGGED_IN_ROLE}}', html(viewer?.role || 'admin'))
     .replace('{{CURRENT_VIEW}}', ['owners', 'accepted', 'team'].includes(view) ? view : 'all')
@@ -760,7 +777,7 @@ async function reviewApartment(request, response, viewer, apartmentId) {
       }
       const agentId = clean(body.agentId);
       const knownAgents = managementAgents([...Object.values(myHomeData), ...Object.values(ssData)]);
-      const agent = agentId ? knownAgents.find(candidate => candidate.id === agentId) : null;
+      const agent = agentId ? knownAgents.find(candidate => candidate.id === agentId && candidate.assignable) : null;
       if (agentId && !agent) throw new Error('The selected agent was not found');
       item.assigned_agent_id = agent?.id || '';
       item.assigned_agent_name = agent?.name || '';
@@ -864,6 +881,47 @@ function startWebServer() {
         return;
       }
       await updateWatcherConfig(request, response);
+      return;
+    }
+    if (pathname === '/api/apartments/reassign' && request.method === 'POST') {
+      if (!['admin', 'manager'].includes(viewer.role)) {
+        response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: 'Management access is required to transfer apartments' }));
+        return;
+      }
+      try {
+        const body = await readRequestJson(request);
+        const fromAgentId = clean(body.fromAgentId);
+        const toAgentId = clean(body.toAgentId);
+        if (!fromAgentId || !toAgentId || fromAgentId === toAgentId) throw new Error('Choose two different agents');
+        const myHomeData = liveMyHomeData || loadData();
+        const ssData = liveSsData || loadSsData();
+        const knownAgents = managementAgents([...Object.values(myHomeData), ...Object.values(ssData)]);
+        const target = knownAgents.find(agent => agent.id === toAgentId && agent.assignable);
+        if (!target) throw new Error('The destination agent is not active');
+        let transferred = 0;
+        const transfer = data => {
+          let changed = false;
+          for (const item of Object.values(data)) {
+            if (item._baseline || item._excluded || item._review_status === 'rejected') continue;
+            if (String(item.assigned_agent_id || '') !== fromAgentId) continue;
+            item.assigned_agent_id = target.id;
+            item.assigned_agent_name = target.name;
+            item._assigned_at = new Date().toISOString();
+            item._reassigned_by = viewer.name || viewer.email;
+            transferred += 1;
+            changed = true;
+          }
+          return changed;
+        };
+        if (transfer(myHomeData)) saveData(myHomeData);
+        if (transfer(ssData)) saveData(ssData, SS_DATA_PATH, SS_CSV_PATH);
+        response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ ok: true, transferred, agentId: target.id, agentName: target.name }));
+      } catch (error) {
+        response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: error.message }));
+      }
       return;
     }
     if (pathname === '/api/apartments/accepted-links' && request.method === 'GET') {
