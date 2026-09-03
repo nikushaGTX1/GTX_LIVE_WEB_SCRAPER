@@ -523,7 +523,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
   const bulkTargets = selectedAgent ? assignableAgents.filter(agent => agent.id !== selectedAgent.id) : [];
   const profileBanner = selectedAgent ? `<div class="profile-filter-banner">
     <span>Showing <strong>${html(selectedAgent.name)}</strong>'s apartments</span>
-    ${canReassign && bulkTargets.length ? `<div class="bulk-transfer"><label>Transfer all to <select id="bulk-transfer-agent"><option value="">Choose agent…</option>${bulkTargets.map(agent => `<option value="${html(agent.id)}">${html(agent.name)}</option>`).join('')}</select></label><button id="bulk-transfer-button" type="button" data-from-agent="${html(selectedAgent.id)}">Transfer all</button></div>` : ''}
+    ${canReassign && bulkTargets.length ? `<div class="bulk-transfer"><label>Transfer all to <select id="bulk-transfer-agent"><option value="">Choose agent…</option><option value="__round_robin__">All agents (round-robin)</option>${bulkTargets.map(agent => `<option value="${html(agent.id)}">${html(agent.name)}</option>`).join('')}</select></label><button id="bulk-transfer-button" type="button" data-from-agent="${html(selectedAgent.id)}">Transfer all</button></div>` : ''}
     <a href="/?view=${view === 'accepted' ? 'accepted' : 'all'}">Show everyone</a>
   </div>` : '';
   const content = view === 'owners' ? buildOwnersContent(viewer) : view === 'team' ? buildTeamContent(allVisible, assignableAgents) : combined.length
@@ -893,22 +893,29 @@ function startWebServer() {
         const body = await readRequestJson(request);
         const fromAgentId = clean(body.fromAgentId);
         const toAgentId = clean(body.toAgentId);
-        if (!fromAgentId || !toAgentId || fromAgentId === toAgentId) throw new Error('Choose two different agents');
+        const distribute = body.distribute === true;
+        if (!fromAgentId) throw new Error('The source agent is required');
+        if (!distribute && (!toAgentId || fromAgentId === toAgentId)) throw new Error('Choose two different agents');
         const myHomeData = liveMyHomeData || loadData();
         const ssData = liveSsData || loadSsData();
         const knownAgents = managementAgents([...Object.values(myHomeData), ...Object.values(ssData)]);
-        const target = knownAgents.find(agent => agent.id === toAgentId && agent.assignable);
-        if (!target) throw new Error('The destination agent is not active');
+        const targets = distribute
+          ? knownAgents.filter(agent => agent.assignable && agent.id !== fromAgentId)
+          : knownAgents.filter(agent => agent.id === toAgentId && agent.assignable);
+        if (!targets.length) throw new Error(distribute ? 'No active destination agents are available' : 'The destination agent is not active');
         let transferred = 0;
+        const distribution = Object.fromEntries(targets.map(agent => [agent.id, { agentId: agent.id, agentName: agent.name, transferred: 0 }]));
         const transfer = data => {
           let changed = false;
           for (const item of Object.values(data)) {
             if (item._baseline || item._excluded || item._review_status === 'rejected') continue;
             if (String(item.assigned_agent_id || '') !== fromAgentId) continue;
+            const target = targets[transferred % targets.length];
             item.assigned_agent_id = target.id;
             item.assigned_agent_name = target.name;
             item._assigned_at = new Date().toISOString();
             item._reassigned_by = viewer.name || viewer.email;
+            distribution[target.id].transferred += 1;
             transferred += 1;
             changed = true;
           }
@@ -917,7 +924,12 @@ function startWebServer() {
         if (transfer(myHomeData)) saveData(myHomeData);
         if (transfer(ssData)) saveData(ssData, SS_DATA_PATH, SS_CSV_PATH);
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-        response.end(JSON.stringify({ ok: true, transferred, agentId: target.id, agentName: target.name }));
+        response.end(JSON.stringify({
+          ok: true, transferred, distributed: distribute,
+          distribution: Object.values(distribution),
+          agentId: distribute ? '' : targets[0].id,
+          agentName: distribute ? '' : targets[0].name
+        }));
       } catch (error) {
         response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify({ error: error.message }));

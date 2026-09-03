@@ -35,3 +35,10 @@ test('comment updates are handled inside the apartment review handler', () => {
   assert.match(reviewSource, /body\.action === 'update-comment'/);
   assert.doesNotMatch(source.slice(serverStart), /body\.action === 'update-comment'/);
 });
+
+test('bulk profile transfer can distribute apartments across active agents', () => {
+  assert.match(source, /body\.distribute === true/);
+  assert.match(source, /knownAgents\.filter\(agent => agent\.assignable && agent\.id !== fromAgentId\)/);
+  assert.match(source, /targets\[transferred % targets\.length\]/);
+  assert.match(source, /distribution\[target\.id\]\.transferred \+= 1/);
+});
