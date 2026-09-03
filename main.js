@@ -186,8 +186,8 @@ function parseArgs(argv) {
   if (!Number.isFinite(options.interval) || options.interval < 3) {
     throw new Error('--interval must be at least 3 seconds');
   }
-  if (!Number.isInteger(options.pages) || options.pages < 1 || options.pages > 10) {
-    throw new Error('--pages must be a whole number between 1 and 10');
+  if (!Number.isInteger(options.pages) || options.pages < 1 || options.pages > 100) {
+    throw new Error('--pages must be a whole number between 1 and 100');
   }
   return options;
 }
@@ -707,7 +707,7 @@ async function updateWatcherConfig(request, response) {
     }
     if (body.pages != null) {
       const pages = Number(body.pages);
-      if (!Number.isInteger(pages) || pages < 1 || pages > 10) throw new Error('Pages must be between 1 and 10');
+      if (!Number.isInteger(pages) || pages < 1 || pages > 100) throw new Error('Pages must be between 1 and 100');
       watcherRuntime.pages = pages;
     }
     if (body.interval != null) {
@@ -1319,7 +1319,7 @@ function loadWatcherConfig(options) {
   const config = {
     version: 2,
     enabled: currentConfig ? saved.enabled !== false : options.searches.length > 0,
-    pages: currentConfig && Number.isInteger(saved.pages) && saved.pages >= 1 && saved.pages <= 10 ? saved.pages : options.pages,
+    pages: currentConfig && Number.isInteger(saved.pages) && saved.pages >= 1 && saved.pages <= 100 ? saved.pages : options.pages,
     interval: currentConfig && Number.isFinite(saved.interval) && saved.interval >= 3 ? saved.interval : options.interval,
     searches: currentConfig && Array.isArray(saved.searches) ? saved.searches : options.searches
   };

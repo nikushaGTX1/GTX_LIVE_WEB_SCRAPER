@@ -28,7 +28,7 @@ apartments. Existing records are preserved even if the watcher state file must b
 rebuilt or the district configuration changes.
 
 Authenticated dashboard admins can paste another filtered MyHome URL, select
-1–10 pages, set a polling interval (minimum 3 seconds), and pause or start MyHome
+1–100 pages, set a polling interval (minimum 3 seconds), and pause or start MyHome
 scraping. These controls are stored in `watcher-config.json` and survive restarts.
 On Railway, users authenticate through the configured dashboard authentication
 mode, and only accounts resolved as admins can change these settings.
@@ -95,7 +95,7 @@ node main.js --url "https://www.myhome.ge/your-search-url" --pages 5
 
 Paste the complete URL after applying any filters on MyHome. The watcher passes
 all query-string filters to every page and changes only the `page` value. It scans
-five pages by default; `--pages` accepts values from 1 through 10. Changing the
+five pages by default; `--pages` accepts values from 1 through 100. Changing the
 URL or page count updates the persisted search configuration. Every listing from
 the selected page range is imported, not only newly posted listings.
 
