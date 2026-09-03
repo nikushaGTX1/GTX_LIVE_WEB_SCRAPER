@@ -460,6 +460,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
   const selectedAgent = agents.find(agent => agent.id === String(selectedAgentId));
   const showManagementComments = view === 'accepted' || Boolean(selectedAgentId && ['admin', 'manager'].includes(viewer?.role));
   const canReassign = ['admin', 'manager'].includes(viewer?.role);
+  const canSelectTransfer = canReassign && Boolean(selectedAgent);
   const assignmentOptions = item => {
     const currentId = String(item.assigned_agent_id || '');
     const current = agents.find(agent => agent.id === currentId);
@@ -475,7 +476,8 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
       : item._api_error
         ? `<span class="website-upload error" title="${html(item._api_error)}">Retrying</span>`
         : '<span class="website-upload pending">Pending</span>';
-    const apartmentRow = `<tr data-apartment-id="${html(item.apartment_id)}" data-district="${html(item.district || 'Other')}" class="apartment-row ${item._review_status === 'accepted' ? 'review-accepted' : ''}">
+    const apartmentRow = `<tr data-apartment-id="${html(item.apartment_id)}" data-apartment-source="${html(item.source)}" data-district="${html(item.district || 'Other')}" class="apartment-row ${item._review_status === 'accepted' ? 'review-accepted' : ''}">
+      ${canSelectTransfer ? `<td class="transfer-select-cell"><input class="transfer-apartment-checkbox" type="checkbox" aria-label="Select apartment ${html(item.apartment_id)} for transfer"></td>` : ''}
       <td class="review-cell">
         <div class="review-buttons">
           ${view === 'accepted' ? '' : `<button class="review-button accept-button${item._review_status === 'accepted' ? ' selected' : ''}" type="button" title="${item._review_status === 'accepted' ? 'Accepted' : 'Accept apartment'}" aria-label="Accept apartment" aria-pressed="${item._review_status === 'accepted' ? 'true' : 'false'}">✓</button>`}
@@ -498,7 +500,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
       ${showManagementComments ? `<td class="accepted-agent"><strong>${html(item._reviewed_by || 'Unknown agent')}</strong><small>${item._reviewed_at ? html(item._reviewed_at) : ''}</small></td><td class="management-comment"><div class="accepted-comment-edit"><textarea class="accepted-comment-editor" maxlength="2000" aria-label="Apartment comment">${html(item._review_comment || '')}</textarea><button class="update-comment" type="button">Save comment</button></div></td>` : ''}
     </tr>`;
     if (view === 'accepted') return apartmentRow;
-    const columnCount = showManagementComments ? 16 : 14;
+    const columnCount = (showManagementComments ? 16 : 14) + (canSelectTransfer ? 1 : 0);
     return `${apartmentRow}<tr class="comment-row" data-apartment-id="${html(item.apartment_id)}" data-comment-for="${html(item.apartment_id)}" hidden>
       <td colspan="${columnCount}">
         <div class="comment-dropdown">
@@ -523,11 +525,11 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
   const bulkTargets = selectedAgent ? assignableAgents.filter(agent => agent.id !== selectedAgent.id) : [];
   const profileBanner = selectedAgent ? `<div class="profile-filter-banner">
     <span>Showing <strong>${html(selectedAgent.name)}</strong>'s apartments</span>
-    ${canReassign && bulkTargets.length ? `<div class="bulk-transfer"><label>Transfer all to <select id="bulk-transfer-agent"><option value="">Choose agent…</option><option value="__round_robin__">All agents (round-robin)</option>${bulkTargets.map(agent => `<option value="${html(agent.id)}">${html(agent.name)}</option>`).join('')}</select></label><button id="bulk-transfer-button" type="button" data-from-agent="${html(selectedAgent.id)}">Transfer all</button></div>` : ''}
+    ${canReassign && bulkTargets.length ? `<div class="bulk-transfer"><span id="transfer-selection-count">0 selected</span><label>Send selected to <select id="bulk-transfer-agent"><option value="">Choose agent…</option>${bulkTargets.map(agent => `<option value="${html(agent.id)}">${html(agent.name)}</option>`).join('')}</select></label><button id="bulk-transfer-button" type="button" data-from-agent="${html(selectedAgent.id)}" disabled>Transfer selected</button></div>` : ''}
     <a href="/?view=${view === 'accepted' ? 'accepted' : 'all'}">Show everyone</a>
   </div>` : '';
   const content = view === 'owners' ? buildOwnersContent(viewer) : view === 'team' ? buildTeamContent(allVisible, assignableAgents) : combined.length
-    ? `${profileBanner}${acceptedSearch}<table class="results-table"><thead><tr><th class="review-heading">Review</th><th>Source</th><th>ID</th><th>Received</th><th>District</th><th>Assigned agent</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th><th>Website</th>${showManagementComments ? '<th>Accepted by</th><th>Comment</th>' : ''}</tr></thead><tbody>${rows}</tbody></table>`
+    ? `${profileBanner}${acceptedSearch}<table class="results-table"><thead><tr>${canSelectTransfer ? '<th class="transfer-select-heading"><input id="select-all-apartments" type="checkbox" aria-label="Select all visible apartments"></th>' : ''}<th class="review-heading">Review</th><th>Source</th><th>ID</th><th>Received</th><th>District</th><th>Assigned agent</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th><th>Website</th>${showManagementComments ? '<th>Accepted by</th><th>Comment</th>' : ''}</tr></thead><tbody>${rows}</tbody></table>`
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
     .replace('{{LISTING_COUNT}}', String(view === 'owners' ? ownersData(viewer).rows.length : view === 'team' ? assignableAgents.length : combined.length))
@@ -893,42 +895,44 @@ function startWebServer() {
         const body = await readRequestJson(request);
         const fromAgentId = clean(body.fromAgentId);
         const toAgentId = clean(body.toAgentId);
-        const distribute = body.distribute === true;
+        const apartments = Array.isArray(body.apartments) ? body.apartments : [];
         if (!fromAgentId) throw new Error('The source agent is required');
-        if (!distribute && (!toAgentId || fromAgentId === toAgentId)) throw new Error('Choose two different agents');
+        if (!toAgentId || fromAgentId === toAgentId) throw new Error('Choose two different agents');
+        if (!apartments.length) throw new Error('Select at least one apartment');
+        if (apartments.length > 10_000) throw new Error('Too many apartments selected');
+        const selectedKeys = new Set(apartments.map(apartment => {
+          const source = clean(apartment?.source);
+          const id = clean(apartment?.id);
+          if (!['MyHome', 'SS.ge'].includes(source) || !id) throw new Error('Invalid apartment selection');
+          return `${source}:${id}`;
+        }));
         const myHomeData = liveMyHomeData || loadData();
         const ssData = liveSsData || loadSsData();
         const knownAgents = managementAgents([...Object.values(myHomeData), ...Object.values(ssData)]);
-        const targets = distribute
-          ? knownAgents.filter(agent => agent.assignable && agent.id !== fromAgentId)
-          : knownAgents.filter(agent => agent.id === toAgentId && agent.assignable);
-        if (!targets.length) throw new Error(distribute ? 'No active destination agents are available' : 'The destination agent is not active');
+        const target = knownAgents.find(agent => agent.id === toAgentId && agent.assignable);
+        if (!target) throw new Error('The destination agent is not active');
         let transferred = 0;
-        const distribution = Object.fromEntries(targets.map(agent => [agent.id, { agentId: agent.id, agentName: agent.name, transferred: 0 }]));
-        const transfer = data => {
+        const transfer = (data, source) => {
           let changed = false;
           for (const item of Object.values(data)) {
             if (item._baseline || item._excluded || item._review_status === 'rejected') continue;
             if (String(item.assigned_agent_id || '') !== fromAgentId) continue;
-            const target = targets[transferred % targets.length];
+            if (!selectedKeys.has(`${source}:${item.apartment_id}`)) continue;
             item.assigned_agent_id = target.id;
             item.assigned_agent_name = target.name;
             item._assigned_at = new Date().toISOString();
             item._reassigned_by = viewer.name || viewer.email;
-            distribution[target.id].transferred += 1;
             transferred += 1;
             changed = true;
           }
           return changed;
         };
-        if (transfer(myHomeData)) saveData(myHomeData);
-        if (transfer(ssData)) saveData(ssData, SS_DATA_PATH, SS_CSV_PATH);
+        if (transfer(myHomeData, 'MyHome')) saveData(myHomeData);
+        if (transfer(ssData, 'SS.ge')) saveData(ssData, SS_DATA_PATH, SS_CSV_PATH);
+        if (!transferred) throw new Error('None of the selected apartments belong to this agent');
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify({
-          ok: true, transferred, distributed: distribute,
-          distribution: Object.values(distribution),
-          agentId: distribute ? '' : targets[0].id,
-          agentName: distribute ? '' : targets[0].name
+          ok: true, transferred, agentId: target.id, agentName: target.name
         }));
       } catch (error) {
         response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });

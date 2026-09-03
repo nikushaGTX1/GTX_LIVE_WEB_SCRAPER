@@ -510,6 +510,9 @@ a:hover { text-decoration: underline; }
 .bulk-transfer select { min-width: 170px; padding: 7px 9px; border: 1px solid #9ccdb2; border-radius: 8px; background: #fff; font: inherit; }
 .bulk-transfer button { padding: 8px 11px; border: 0; border-radius: 8px; background: #087443; color: #fff; cursor: pointer; font: inherit; font-size: 12px; font-weight: 800; }
 .bulk-transfer button:disabled { cursor: wait; opacity: .6; }
+.transfer-select-heading, .transfer-select-cell { width: 42px; min-width: 42px; text-align: center; }
+.transfer-apartment-checkbox, #select-all-apartments { width: 18px; height: 18px; accent-color: #087443; cursor: pointer; }
+#transfer-selection-count { min-width: 72px; font-size: 12px; font-weight: 800; color: #087443; }
 .team-panel { padding: 4px; }
 .team-heading { margin-bottom: 18px; }
 .team-heading h2 { margin: 2px 0 5px; }

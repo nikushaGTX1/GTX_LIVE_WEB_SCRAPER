@@ -525,7 +525,32 @@
       return result;
     };
     document.querySelectorAll('.agent-reassign').forEach(select => { select.dataset.savedValue = select.value; });
+    const selectedTransferRows = () => [...document.querySelectorAll('.apartment-row .transfer-apartment-checkbox:checked')]
+      .map(checkbox => checkbox.closest('.apartment-row'));
+    const updateTransferSelection = () => {
+      const rows = selectedTransferRows();
+      const count = document.getElementById('transfer-selection-count');
+      const button = document.getElementById('bulk-transfer-button');
+      const selectAll = document.getElementById('select-all-apartments');
+      if (count) count.textContent = `${rows.length} selected`;
+      if (button) button.disabled = rows.length === 0;
+      if (selectAll) {
+        const visible = [...document.querySelectorAll('.apartment-row:not([hidden]) .transfer-apartment-checkbox')];
+        selectAll.checked = visible.length > 0 && visible.every(checkbox => checkbox.checked);
+        selectAll.indeterminate = rows.length > 0 && !selectAll.checked;
+      }
+    };
+    document.getElementById('select-all-apartments')?.addEventListener('change', event => {
+      document.querySelectorAll('.apartment-row:not([hidden]) .transfer-apartment-checkbox').forEach(checkbox => {
+        checkbox.checked = event.currentTarget.checked;
+      });
+      updateTransferSelection();
+    });
     document.querySelector('.results-table')?.addEventListener('change', async event => {
+      if (event.target.matches('.transfer-apartment-checkbox')) {
+        updateTransferSelection();
+        return;
+      }
       const select = event.target.closest('.agent-reassign');
       if (!select) return;
       const row = select.closest('.apartment-row');
@@ -548,30 +573,22 @@
       const button = event.currentTarget;
       const select = document.getElementById('bulk-transfer-agent');
       const targetName = select.options[select.selectedIndex]?.textContent;
-      const distribute = select.value === '__round_robin__';
+      const rows = selectedTransferRows();
+      const apartments = rows.map(row => ({ id: row.dataset.apartmentId, source: row.dataset.apartmentSource }));
+      if (!apartments.length) return alert('Select at least one apartment to transfer.');
       if (!select.value) return alert('Choose the agent who should receive these apartments.');
-      const confirmation = distribute
-        ? 'Distribute every apartment shown in this profile evenly across all other active agents?'
-        : `Transfer every apartment shown in this agent profile to ${targetName}?`;
-      if (!confirm(confirmation)) return;
+      if (!confirm(`Transfer ${apartments.length} selected apartment(s) to ${targetName}?`)) return;
       button.disabled = true;
       select.disabled = true;
       try {
         const response = await fetch('/api/apartments/reassign', {
           method: 'POST', headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ fromAgentId: button.dataset.fromAgent, toAgentId: distribute ? '' : select.value, distribute })
+          body: JSON.stringify({ fromAgentId: button.dataset.fromAgent, toAgentId: select.value, apartments })
         });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'Could not transfer apartments');
-        if (result.distributed) {
-          const summary = result.distribution.filter(agent => agent.transferred > 0)
-            .map(agent => `${agent.agentName}: ${agent.transferred}`).join('\n');
-          alert(`Distributed ${result.transferred} apartment(s) across the agents.${summary ? `\n\n${summary}` : ''}`);
-          location.href = '/?view=team';
-        } else {
-          alert(`Transferred ${result.transferred} apartment(s) to ${result.agentName}.`);
-          location.href = `/?view=all&agent=${encodeURIComponent(result.agentId)}`;
-        }
+        alert(`Transferred ${result.transferred} selected apartment(s) to ${result.agentName}.`);
+        location.reload();
       } catch (error) {
         button.disabled = false;
         select.disabled = false;

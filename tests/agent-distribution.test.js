@@ -36,9 +36,9 @@ test('comment updates are handled inside the apartment review handler', () => {
   assert.doesNotMatch(source.slice(serverStart), /body\.action === 'update-comment'/);
 });
 
-test('bulk profile transfer can distribute apartments across active agents', () => {
-  assert.match(source, /body\.distribute === true/);
-  assert.match(source, /knownAgents\.filter\(agent => agent\.assignable && agent\.id !== fromAgentId\)/);
-  assert.match(source, /targets\[transferred % targets\.length\]/);
-  assert.match(source, /distribution\[target\.id\]\.transferred \+= 1/);
+test('profile transfer is restricted to explicitly selected apartments', () => {
+  assert.match(source, /if \(!apartments\.length\) throw new Error\('Select at least one apartment'\)/);
+  assert.match(source, /selectedKeys\.has\(`\$\{source\}:\$\{item\.apartment_id\}`\)/);
+  assert.match(source, /transfer\(myHomeData, 'MyHome'\)/);
+  assert.match(source, /transfer\(ssData, 'SS\.ge'\)/);
 });
