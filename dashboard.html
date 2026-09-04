@@ -467,12 +467,77 @@
       setTimeout(() => cell.classList.remove('saved'), 700);
     };
     document.querySelectorAll('.owner-cell').forEach(cell => { cell.dataset.savedValue = cell.textContent.trim(); });
+    const ownersTable = document.querySelector('.owners-table');
+    let ownerDistrict = '';
+    let ownerSortColumn = null;
+    const ownerRows = [...(ownersTable?.tBodies[0]?.rows || [])];
+    const ownerNumber = value => {
+      const normalized = String(value).replace(/\s/g, '').replace(/,/g, '').replace(/[^\d.-]/g, '');
+      const number = Number(normalized);
+      return Number.isFinite(number) ? number : Number.NEGATIVE_INFINITY;
+    };
+    const applyOwnerFilters = () => {
+      if (!ownersTable) return;
+      const query = document.getElementById('table-search-input')?.value.trim().toLocaleLowerCase() || '';
+      const ordered = ownerSortColumn === null ? ownerRows : [...ownerRows].sort((left, right) => {
+        const difference = ownerNumber(right.cells[ownerSortColumn]?.textContent) - ownerNumber(left.cells[ownerSortColumn]?.textContent);
+        return difference || ownerRows.indexOf(left) - ownerRows.indexOf(right);
+      });
+      ordered.forEach(row => {
+        ownersTable.tBodies[0].appendChild(row);
+        const districtMatches = !ownerDistrict || row.cells[2]?.textContent.trim() === ownerDistrict;
+        const searchMatches = !query || row.textContent.toLocaleLowerCase().includes(query);
+        row.hidden = !districtMatches || !searchMatches;
+      });
+      const visible = ordered.filter(row => !row.hidden).length;
+      const status = document.getElementById('table-search-status');
+      if (status) status.textContent = (query || ownerDistrict) ? `${visible} of ${ownerRows.length} shown` : `${ownerRows.length} total`;
+    };
+    ownersTable?.addEventListener('click', event => {
+      const sortButton = event.target.closest('[data-owner-sort]');
+      if (sortButton) {
+        const column = Number(sortButton.dataset.ownerSort);
+        ownerSortColumn = ownerSortColumn === column ? null : column;
+        ownersTable.querySelectorAll('[data-owner-sort]').forEach(button => button.setAttribute('aria-pressed', String(Number(button.dataset.ownerSort) === ownerSortColumn)));
+        applyOwnerFilters();
+        return;
+      }
+      const districtButton = event.target.closest('[data-owner-filter="district"]');
+      const districtMenu = ownersTable.querySelector('.owner-district-menu');
+      if (districtButton) {
+        const opening = districtMenu.hidden;
+        districtMenu.hidden = !opening;
+        districtButton.setAttribute('aria-expanded', String(opening));
+        return;
+      }
+      const option = event.target.closest('[data-owner-district]');
+      if (option) {
+        const selected = option.dataset.ownerDistrict;
+        ownerDistrict = selected && selected === ownerDistrict ? '' : selected;
+        ownersTable.querySelectorAll('[data-owner-district]').forEach(button => button.classList.toggle('active', button.dataset.ownerDistrict === ownerDistrict));
+        const trigger = ownersTable.querySelector('[data-owner-filter="district"]');
+        trigger.classList.toggle('active', Boolean(ownerDistrict));
+        trigger.setAttribute('aria-expanded', 'false');
+        districtMenu.hidden = true;
+        applyOwnerFilters();
+      }
+    });
+    document.addEventListener('click', event => {
+      if (!ownersTable || event.target.closest('.owner-filter-heading')) return;
+      const menu = ownersTable.querySelector('.owner-district-menu');
+      if (menu) menu.hidden = true;
+      ownersTable.querySelector('[data-owner-filter="district"]')?.setAttribute('aria-expanded', 'false');
+    });
     const tableSearchInput = document.getElementById('table-search-input');
     if (tableSearchInput) {
       const table = document.querySelector(tableSearchInput.dataset.searchTable);
       const searchableRows = [...(table?.querySelectorAll(tableSearchInput.dataset.searchRows) || [])];
       const searchStatus = document.getElementById('table-search-status');
       const applyTableSearch = () => {
+        if (table === ownersTable) {
+          applyOwnerFilters();
+          return;
+        }
         const query = tableSearchInput.value.trim().toLocaleLowerCase();
         let visible = 0;
         searchableRows.forEach(row => {

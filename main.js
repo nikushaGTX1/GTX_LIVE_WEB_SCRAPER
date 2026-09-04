@@ -376,7 +376,13 @@ function ownersData(viewer) {
 
 function buildOwnersContent(viewer) {
   const data = ownersData(viewer);
-  const head = `${data.headers.map(header => `<th>${html(header)}</th>`).join('')}<th class="owner-actions-column">Actions</th>`;
+  const districts = [...new Set(data.rows.map(row => clean(row[2])).filter(Boolean))]
+    .sort((left, right) => left.localeCompare(right, 'ka', { sensitivity: 'base' }));
+  const head = `${data.headers.map((header, columnIndex) => {
+    if (columnIndex === 2) return `<th class="owner-filter-heading"><button class="owner-filter-button" type="button" data-owner-filter="district" aria-expanded="false">${html(header)} <span aria-hidden="true">▾</span></button><div class="owner-district-menu" hidden><button type="button" data-owner-district="">ყველა უბანი</button>${districts.map(district => `<button type="button" data-owner-district="${html(district)}">${html(district)}</button>`).join('')}</div></th>`;
+    if (columnIndex === 4 || columnIndex === 5) return `<th><button class="owner-filter-button" type="button" data-owner-sort="${columnIndex}" aria-pressed="false">${html(header)} <span aria-hidden="true">↓</span></button></th>`;
+    return `<th>${html(header)}</th>`;
+  }).join('')}<th class="owner-actions-column">Actions</th>`;
   const rows = data.rows.map((row, rowIndex) => `<tr data-owner-row="${rowIndex}">${data.headers.map((_, columnIndex) => `<td class="owner-cell" contenteditable="true" spellcheck="false" data-owner-index="${rowIndex}" data-owner-column="${columnIndex}">${html(row[columnIndex] ?? '')}</td>`).join('')}<td class="owner-row-actions"><button class="owner-remove" type="button" data-owner-index="${rowIndex}" aria-label="Remove owner row">Remove</button></td></tr>`).join('\n');
   return `<section class="owners-panel" aria-labelledby="owners-title">
     <div class="owners-toolbar">
