@@ -7,6 +7,24 @@ const path = require('node:path');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 
+test('management includes new API agents outside the automatic distribution pool', () => {
+  const vm = require('node:vm');
+  const context = vm.createContext({
+    websiteApiAgents: [{ id: 'old', name: 'Old agent' }],
+    websiteDirectoryAgents: [{ id: 'old', name: 'Old agent' }, { id: 'new', name: 'New agent' }],
+    dashboardUploadAgents: [{ id: 'historical', name: 'Former agent' }],
+    dashboardAccounts: () => [],
+    clean: value => String(value || '').trim(),
+    agentDisplayName: agent => agent.name
+  });
+  vm.runInContext(source.slice(source.indexOf('function managementAgents('), source.indexOf('function buildTeamContent(')), context);
+  const agents = vm.runInContext('managementAgents()', context);
+  assert.equal(agents.find(agent => agent.id === 'new').assignable, true);
+  assert.equal(agents.find(agent => agent.id === 'historical').assignable, false);
+  context.websiteDirectoryAgents = [{ id: 'old', name: 'Old agent' }];
+  assert.equal(vm.runInContext('managementAgents()', context).some(agent => agent.id === 'new'), false);
+});
+
 test('pending apartments are persistently assigned in round-robin order', () => {
   assert.match(source, /const agents = await getDistributionAgents\(\)/);
   assert.match(source, /Number\(state\.api_assignment_index \|\| 0\) % agents\.length/);

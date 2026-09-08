@@ -55,6 +55,7 @@ const REVEAL_RE = /(ტელეფონ|ნომრის ნახვა|ნ
 let ssAuthToken = '';
 let websiteApiToken = '';
 let websiteApiAgents = [];
+let websiteDirectoryAgents = null;
 let dashboardUploadAgents = [];
 let dashboardUploadsRefreshedAt = 0;
 let dashboardUploadsRefreshPromise = null;
@@ -406,11 +407,11 @@ function buildOwnersContent(viewer) {
 
 function managementAgents(items = []) {
   const agents = new Map();
-  const activeAgentIds = new Set(websiteApiAgents.map(agent => String(agent.id || '')));
+  const activeAgentIds = new Set((websiteDirectoryAgents ?? websiteApiAgents).map(agent => String(agent.id || '')));
   for (const account of dashboardAccounts()) {
     if (account.role === 'agent' && account.agentId) activeAgentIds.add(String(account.agentId));
   }
-  for (const agent of dashboardUploadAgents) {
+  for (const agent of [...dashboardUploadAgents, ...(websiteDirectoryAgents || []).map(agent => ({ id: agent.id, name: agentDisplayName(agent) }))]) {
     if (agent.id) agents.set(String(agent.id), { id: String(agent.id), name: clean(agent.name) || String(agent.id), assignable: activeAgentIds.has(String(agent.id)) });
   }
   for (const account of dashboardAccounts()) {
@@ -1197,7 +1198,7 @@ function startWebServer() {
       const requested = requestUrl.searchParams.get('view');
       const requestedView = ['owners', 'accepted', 'team'].includes(requested) ? requested : 'all';
       const allowedView = requestedView === 'team' && !['admin', 'manager'].includes(viewer.role) ? 'all' : requestedView;
-      if(!['owners', 'team'].includes(allowedView))await Promise.race([
+      if(allowedView !== 'owners')await Promise.race([
         refreshListingUploadHistory(),
         new Promise(resolve=>setTimeout(resolve,4000))
       ]);
@@ -1813,6 +1814,7 @@ async function getDistributionAgents() {
     .map(agent => ({ ...agent, id: String(agent.userId ?? agent.user_id ?? agent.user?.id ?? agent.id ?? '') }))
     .filter(agent => agent.id)
     .sort((a, b) => a.id.localeCompare(b.id));
+  websiteDirectoryAgents = available;
   const configuredIds = String(process.env.WEBSITE_API_AGENT_IDS || '')
     .split(',').map(value => value.trim()).filter(Boolean);
   const distributionCount = Number(process.env.AGENT_DISTRIBUTION_COUNT || 8);
@@ -1885,6 +1887,9 @@ async function hydrateListingUploadHistory() {
   if (!websiteApiToken && !await loginWebsiteApi()) return;
 
   const agentPayload = await websiteApiRequest('/api/Agents');
+  websiteDirectoryAgents = responseItems(agentPayload)
+    .map(agent => ({ ...agent, id: String(agent.userId ?? agent.user_id ?? agent.user?.id ?? agent.id ?? '') }))
+    .filter(agent => agent.id);
   dashboardUploadAgents = responseItems(agentPayload)
     .map(agent => ({
       id: String(agent.userId ?? agent.user_id ?? agent.user?.id ?? agent.id ?? ''),
@@ -2019,7 +2024,7 @@ async function syncPendingWebsiteApartments(data, state, onlyApartmentId = null,
     watcherStatus.state = 'assigning';
     watcherStatus.message = `Assigning ${sourceLabel} apartment ${pendingIndex + 1} of ${pending.length} to agents…`;
     let agent = item.assigned_agent_id
-      ? agents.find(candidate => candidate.id === String(item.assigned_agent_id))
+      ? (websiteDirectoryAgents ?? agents).find(candidate => candidate.id === String(item.assigned_agent_id))
       : null;
     if (!agent) {
       const index = Number(state.api_assignment_index || 0) % agents.length;
