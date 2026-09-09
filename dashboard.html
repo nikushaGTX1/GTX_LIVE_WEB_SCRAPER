@@ -20,6 +20,7 @@
           <span>Logged in as</span>
           <strong id="logged-in-as">{{LOGGED_IN_AS}}</strong>
           <small id="logged-in-role">{{LOGGED_IN_ROLE}}</small>
+          <a class="logout-link" href="/logout">Log out</a>
         </div>
         <div class="listing-count" aria-label="New listing count">
           <strong id="listing-count">{{LISTING_COUNT}}</strong>
@@ -30,10 +31,18 @@
 
     <nav class="management-nav" id="management-nav" data-current-view="{{CURRENT_VIEW}}" hidden aria-label="Management views">
       <a href="/" data-view="all">All apartments</a>
-      <a href="/?view=accepted" data-view="accepted">✓ Accepted apartments</a>
+      <a href="/?view=accepted" data-view="accepted">✓ Ready For Upload</a>
+      <a href="/?view=team" data-view="team" data-management-role>Team profiles</a>
       <a href="/?view=owners" data-view="owners">Owners</a>
-      <button id="copy-accepted-links" type="button" data-management-only>Copy accepted links</button>
+      <input id="word-apartments-file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
+      <button id="import-word-apartments" type="button">Import Word links</button>
+      <span class="copy-accepted-group" data-ready-copy aria-label="Copy ready apartment links by received date">
+        <button class="copy-accepted-links" type="button" data-days-ago="0">Copy today</button>
+        <button class="copy-accepted-links" type="button" data-days-ago="1">Copy yesterday</button>
+        <button class="copy-accepted-links" type="button" data-days-ago="3">Copy 3 days ago</button>
+      </span>
     </nav>
+    <p id="word-import-status" class="word-import-status" hidden aria-live="polite"></p>
 
     <section class="admin-controls" id="admin-controls" aria-labelledby="watcher-controls-title">
       <div class="control-heading">
@@ -48,7 +57,7 @@
           <input id="watcher-url" type="url" placeholder="https://www.myhome.ge/udzravi-qoneba/..." autocomplete="off">
         </label>
         <label>Pages
-          <input id="watcher-pages" type="number" min="1" max="10" value="5" required>
+          <input id="watcher-pages" type="number" min="1" max="100" value="5" required>
         </label>
         <label>Every (seconds)
           <input id="watcher-interval" type="number" min="3" max="3600" value="3" required>
@@ -75,11 +84,12 @@
     </section>
 
     <nav class="district-filters" aria-label="Filter apartments by district">
+      <button id="clear-pending-apartments" class="clear-pending-apartments" type="button" hidden>Clear all pending apartments</button>
       <button class="district-filter active" type="button" data-district="all">All</button>
-      <button class="district-filter" type="button" data-district="Saburtalo">Saburtalo</button>
-      <button class="district-filter" type="button" data-district="Vake">Vake</button>
-      <button class="district-filter" type="button" data-district="Didi Dighomi">Didi Dighomi</button>
-      <button class="district-filter" type="button" data-district="Digomi">Digomi</button>
+      <span class="district-control"><button class="district-filter" type="button" data-district="Saburtalo">Saburtalo</button><button class="district-remove" type="button" data-district="Saburtalo" aria-label="Remove every Saburtalo apartment" title="Remove every Saburtalo apartment" hidden>×</button></span>
+      <span class="district-control"><button class="district-filter" type="button" data-district="Vake">Vake</button><button class="district-remove" type="button" data-district="Vake" aria-label="Remove every Vake apartment" title="Remove every Vake apartment" hidden>×</button></span>
+      <span class="district-control"><button class="district-filter" type="button" data-district="Didi Dighomi">Didi Dighomi</button><button class="district-remove" type="button" data-district="Didi Dighomi" aria-label="Remove every Didi Dighomi apartment" title="Remove every Didi Dighomi apartment" hidden>×</button></span>
+      <span class="district-control"><button class="district-filter" type="button" data-district="Digomi">Digomi</button><button class="district-remove" type="button" data-district="Digomi" aria-label="Remove every Digomi apartment" title="Remove every Digomi apartment" hidden>×</button></span>
     </nav>
 
     <section class="results" id="dashboard-content" aria-label="Apartment results">
@@ -87,6 +97,7 @@
     </section>
   </main>
   <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mammoth@1.8.0/mammoth.browser.min.js"></script>
   <script>
     // Keep the editable template presentable when it is opened directly.
     // main.js replaces these markers with live data in live-results.html.
@@ -99,6 +110,7 @@
     const message = document.getElementById('watcher-message');
     let watcherConfig = null;
     let reviewInteractionUntil = 0;
+    let wordImportInProgress = false;
     if (count.textContent.includes('{{LISTING_COUNT}}')) count.textContent = '0';
     if (viewer.textContent.includes('{{LOGGED_IN_AS}}')) viewer.textContent = 'Template preview';
     if (viewerRole.textContent.includes('{{LOGGED_IN_ROLE}}')) viewerRole.textContent = 'admin';
@@ -106,19 +118,27 @@
     if (managementNav.dataset.currentView.includes('{{CURRENT_VIEW}}')) managementNav.dataset.currentView = 'all';
     managementNav.querySelectorAll('a').forEach(link => link.classList.toggle('active', link.dataset.view === managementNav.dataset.currentView));
     const ownersView = managementNav.dataset.currentView === 'owners';
-    if (ownersView) {
+    const teamView = managementNav.dataset.currentView === 'team';
+    if (ownersView || teamView) {
       document.getElementById('admin-controls').hidden = true;
       document.querySelector('.district-filters').hidden = true;
-      document.getElementById('refresh-status').textContent = 'Your private owner database';
-      document.querySelector('.listing-count span').textContent = 'owners';
-      document.getElementById('copy-accepted-links').hidden = true;
+      document.getElementById('refresh-status').textContent = ownersView ? 'Your private owner database' : 'Every agent and their apartment queue';
+      document.querySelector('.listing-count span').textContent = ownersView ? 'owners' : 'profiles';
+      document.querySelector('.copy-accepted-group').hidden = true;
+      document.getElementById('import-word-apartments').hidden = true;
     }
-    document.getElementById('copy-accepted-links').addEventListener('click', async event => {
+    document.querySelectorAll('.copy-accepted-links').forEach(copyButton => copyButton.addEventListener('click', async event => {
       const button = event.currentTarget;
+      const originalLabel = button.textContent;
       try {
-        const response = await fetch('/api/apartments/accepted-links');
+        const response = await fetch(`/api/apartments/accepted-links?daysAgo=${encodeURIComponent(button.dataset.daysAgo)}`);
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'Could not load accepted links');
+        if (!result.entries.length) {
+          button.textContent = `No apartments (${result.date})`;
+          setTimeout(() => { button.textContent = originalLabel; }, 2200);
+          return;
+        }
         const text = result.entries
           .map(entry => `${entry.link}\nComment: ${entry.comment || ''}`)
           .join('\n\n');
@@ -132,12 +152,12 @@
           helper.remove();
         }
         button.textContent = `Copied ${result.entries.length} apartment(s)`;
-        setTimeout(() => { button.textContent = 'Copy accepted links'; }, 1800);
+        setTimeout(() => { button.textContent = originalLabel; }, 1800);
       } catch (error) {
         alert(error.message);
       }
-    });
-    if (content.textContent.includes('{{DASHBOARD_CONTENT}}')) {
+    }));
+    if (content.childElementCount === 0 && content.textContent.trim() === '{{DASHBOARD_CONTENT}}') {
       content.innerHTML = '<div class="empty">Template preview — run the scraper to see live apartments.</div>';
     }
     const applyDistrict = district => {
@@ -165,19 +185,28 @@
 
     const showWatcherConfig = config => {
       watcherConfig = config;
-      document.getElementById('admin-controls').hidden = ownersView || !config.canAdmin;
+      document.getElementById('admin-controls').hidden = ownersView || teamView || !config.canAdmin;
+      document.querySelectorAll('.district-remove').forEach(button => { button.hidden = !config.canAdmin; });
+      document.getElementById('clear-pending-apartments').hidden = !config.canAdmin || managementNav.dataset.currentView !== 'all';
       managementNav.hidden = false;
-      managementNav.querySelectorAll('[data-management-only]').forEach(item => { item.hidden = !config.canManage; });
+      managementNav.querySelectorAll('[data-management-role]').forEach(item => { item.hidden = !config.canManage; });
+      managementNav.querySelectorAll('[data-management-only]').forEach(item => {
+        item.hidden = ownersView || !config.canManage || managementNav.dataset.currentView !== 'accepted';
+      });
+      managementNav.querySelectorAll('[data-ready-copy]').forEach(item => {
+        item.hidden = ownersView || managementNav.dataset.currentView !== 'accepted';
+      });
+      document.getElementById('import-word-apartments').hidden = !config.canAdmin || managementNav.dataset.currentView !== 'all';
       const assignment = document.getElementById('assignment-status');
       assignment.textContent = config.assignment?.enabled
-        ? `Round-robin assignment enabled · ${config.assignment.pending} pending API uploads`
+        ? `Round-robin assignment enabled · ${config.assignment.pending} pending agent assignments`
         : 'Website API assignment disabled — configure WEBSITE_API_EMAIL and WEBSITE_API_PASSWORD';
       if (config.assignment?.lastError) assignment.textContent += ` · Error: ${config.assignment.lastError}`;
       assignment.classList.toggle('warning', !config.assignment?.enabled || config.assignment.pending > 0);
       toggle.textContent = config.enabled ? 'Stop scraper' : 'Start scraper';
       toggle.classList.toggle('running', config.enabled);
-      document.getElementById('refresh-status').textContent = ownersView
-        ? 'Your private owner database'
+      document.getElementById('refresh-status').textContent = ownersView || teamView
+        ? (ownersView ? 'Your private owner database' : 'Every agent and their apartment queue')
         : (config.enabled ? 'Auto-refreshes every 3 seconds' : 'Dashboard refresh paused');
       document.getElementById('watcher-pages').value = config.pages;
       document.getElementById('watcher-interval').value = config.interval;
@@ -253,6 +282,126 @@
     };
     fetch('/api/watcher/config').then(response => response.json()).then(showWatcherConfig)
       .catch(error => { message.textContent = error.message; });
+    document.getElementById('clear-pending-apartments').addEventListener('click', async event => {
+      const button = event.currentTarget;
+      if (!confirm('Clear all pending apartments from every district and both sources? Ready For Upload and Owners will be kept.')) return;
+      reviewInteractionUntil = Date.now() + 5 * 60 * 1000;
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+      try {
+        const response = await fetch('/api/apartments?scope=all-pending', { method: 'DELETE' });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Could not clear pending apartments');
+        alert(`Cleared ${result.removed} pending apartment(s) across all districts. Ready For Upload and Owners were preserved.`);
+        location.reload();
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        reviewInteractionUntil = Date.now() + 10000;
+      }
+    });
+    document.querySelector('.district-filters').addEventListener('click', async event => {
+      const button = event.target.closest('.district-remove');
+      if (!button) return;
+      event.preventDefault();
+      event.stopPropagation();
+      const district = button.dataset.district;
+      if (!confirm(`Remove every saved apartment from ${district}? This cannot be undone.`)) return;
+      reviewInteractionUntil = Date.now() + 5 * 60 * 1000;
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+      try {
+        const response = await fetch(`/api/apartments?district=${encodeURIComponent(district)}`, { method: 'DELETE' });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Could not remove district apartments');
+        document.querySelectorAll(`tr.apartment-row[data-district="${CSS.escape(district)}"]`).forEach(row => {
+          document.querySelector(`tr.comment-row[data-comment-for="${row.dataset.apartmentId}"]`)?.remove();
+          row.remove();
+        });
+        alert(`Removed ${result.removed} waiting apartment(s) from ${district}.${result.preserved ? ` Kept ${result.preserved} in Ready For Upload.` : ''}`);
+        location.href = '/';
+      } catch (error) {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        reviewInteractionUntil = Date.now() + 10000;
+        alert(error.message);
+      }
+    });
+    const wordApartmentsFile = document.getElementById('word-apartments-file');
+    const importWordButton = document.getElementById('import-word-apartments');
+    const wordImportStatus = document.getElementById('word-import-status');
+    const savedWordImportStatus = localStorage.getItem('word-apartment-import-status');
+    if (savedWordImportStatus && managementNav.dataset.currentView === 'all') {
+      wordImportStatus.textContent = savedWordImportStatus;
+      wordImportStatus.hidden = false;
+    }
+    const showWordImportStatus = text => {
+      wordImportStatus.textContent = text;
+      wordImportStatus.hidden = false;
+      localStorage.setItem('word-apartment-import-status', text);
+    };
+    importWordButton.addEventListener('click', () => {
+      wordApartmentsFile.value = '';
+      wordApartmentsFile.click();
+    });
+    wordApartmentsFile.addEventListener('change', async () => {
+      const file = wordApartmentsFile.files[0];
+      if (!file) return;
+      wordImportInProgress = true;
+      importWordButton.disabled = true;
+      try {
+        importWordButton.textContent = 'Reading Word…';
+        if (!window.mammoth) throw new Error('Word reader could not load. Check your internet connection and try again.');
+        const converted = await mammoth.convertToHtml({ arrayBuffer: await file.arrayBuffer() });
+        const parsed = new DOMParser().parseFromString(converted.value, 'text/html');
+        const tableRows = [...parsed.querySelectorAll('table')].flatMap(table => {
+          const tableRows = [...table.querySelectorAll('tr')];
+          if (tableRows.length < 2) return [];
+          const headers = [...tableRows[0].querySelectorAll('th, td')].map(cell => cell.textContent.trim());
+          return tableRows.slice(1).map(row => Object.fromEntries(
+            [...row.querySelectorAll('th, td')].map((cell, index) => [headers[index] || `column_${index + 1}`, cell.textContent.trim()])
+          ));
+        });
+        const linkedUrls = [...parsed.querySelectorAll('a[href]')].map(link => link.href);
+        const textUrls = parsed.body.textContent.match(/https?:\/\/[^\s<]+/gi) || [];
+        const urls = [...new Set([...linkedUrls, ...textUrls]
+          .map(url => url.replace(/[),.;]+$/, ''))
+          .filter(url => /^https?:\/\/(?:www\.)?myhome\.ge\//i.test(url)))];
+        const tableUrls = new Set(tableRows.map(row => row.url || row.URL || row.link || row.Link).filter(Boolean));
+        const rows = [...tableRows, ...urls.filter(url => !tableUrls.has(url)).map(url => ({ url }))];
+        if (!rows.length) throw new Error('No MyHome links were found in the Word document.');
+        const totals = { imported: 0, restored: 0, duplicates: 0, excluded: 0, detailErrors: 0 };
+        const batchSize = 10;
+        showWordImportStatus(`Found ${rows.length} unique MyHome link(s). Starting import…`);
+        for (let start = 0; start < rows.length; start += batchSize) {
+          const batch = rows.slice(start, start + batchSize);
+          importWordButton.textContent = `Importing ${Math.min(start + batch.length, rows.length)}/${rows.length}…`;
+          const response = await fetch('/api/apartments/import-word', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ rows: batch })
+          });
+          const result = await response.json();
+          if (!response.ok) throw new Error(`${result.error || 'Could not import Word apartments'} (${start} of ${rows.length} processed)`);
+          for (const key of Object.keys(totals)) totals[key] += Number(result[key] || 0);
+          const processed = Math.min(start + batch.length, rows.length);
+          showWordImportStatus(`Processed ${processed}/${rows.length} · Added ${totals.imported} · Restored ${totals.restored} · Already saved ${totals.duplicates} · Filtered ${totals.excluded}`);
+        }
+        const visibleAdded = totals.imported - totals.excluded;
+        const finalStatus = `Word import complete · Found ${rows.length} · Visible apartments added ${visibleAdded} · Restored ${totals.restored} · Already saved ${totals.duplicates} · Filtered ${totals.excluded}${totals.detailErrors ? ` · Detail errors ${totals.detailErrors}` : ''}`;
+        showWordImportStatus(finalStatus);
+        alert(finalStatus);
+        location.href = '/';
+      } catch (error) {
+        showWordImportStatus(`Word import stopped: ${error.message}`);
+        alert(error.message);
+        wordImportInProgress = false;
+        importWordButton.disabled = false;
+        importWordButton.textContent = 'Import Word links';
+      }
+    });
     setInterval(() => {
       fetch('/api/watcher/config').then(response => response.json())
         .then(config => showWatcherStatus(config.status)).catch(() => {});
@@ -340,6 +489,94 @@
       setTimeout(() => cell.classList.remove('saved'), 700);
     };
     document.querySelectorAll('.owner-cell').forEach(cell => { cell.dataset.savedValue = cell.textContent.trim(); });
+    const ownersTable = document.querySelector('.owners-table');
+    let ownerDistrict = '';
+    let ownerSortColumn = null;
+    const ownerRows = [...(ownersTable?.tBodies[0]?.rows || [])];
+    const ownerNumber = value => {
+      const normalized = String(value).replace(/\s/g, '').replace(/,/g, '').replace(/[^\d.-]/g, '');
+      const number = Number(normalized);
+      return Number.isFinite(number) ? number : Number.NEGATIVE_INFINITY;
+    };
+    const applyOwnerFilters = () => {
+      if (!ownersTable) return;
+      const query = document.getElementById('table-search-input')?.value.trim().toLocaleLowerCase() || '';
+      const ordered = ownerSortColumn === null ? ownerRows : [...ownerRows].sort((left, right) => {
+        const difference = ownerNumber(right.cells[ownerSortColumn]?.textContent) - ownerNumber(left.cells[ownerSortColumn]?.textContent);
+        return difference || ownerRows.indexOf(left) - ownerRows.indexOf(right);
+      });
+      ordered.forEach(row => {
+        ownersTable.tBodies[0].appendChild(row);
+        const districtMatches = !ownerDistrict || row.cells[2]?.textContent.trim() === ownerDistrict;
+        const searchMatches = !query || row.textContent.toLocaleLowerCase().includes(query);
+        row.hidden = !districtMatches || !searchMatches;
+      });
+      const visible = ordered.filter(row => !row.hidden).length;
+      const status = document.getElementById('table-search-status');
+      if (status) status.textContent = (query || ownerDistrict) ? `${visible} of ${ownerRows.length} shown` : `${ownerRows.length} total`;
+    };
+    ownersTable?.addEventListener('click', event => {
+      const sortButton = event.target.closest('[data-owner-sort]');
+      if (sortButton) {
+        const column = Number(sortButton.dataset.ownerSort);
+        ownerSortColumn = ownerSortColumn === column ? null : column;
+        ownersTable.querySelectorAll('[data-owner-sort]').forEach(button => button.setAttribute('aria-pressed', String(Number(button.dataset.ownerSort) === ownerSortColumn)));
+        applyOwnerFilters();
+        return;
+      }
+      const districtButton = event.target.closest('[data-owner-filter="district"]');
+      const districtMenu = ownersTable.querySelector('.owner-district-menu');
+      if (districtButton) {
+        const opening = districtMenu.hidden;
+        districtMenu.hidden = !opening;
+        districtButton.setAttribute('aria-expanded', String(opening));
+        return;
+      }
+      const option = event.target.closest('[data-owner-district]');
+      if (option) {
+        const selected = option.dataset.ownerDistrict;
+        ownerDistrict = selected && selected === ownerDistrict ? '' : selected;
+        ownersTable.querySelectorAll('[data-owner-district]').forEach(button => button.classList.toggle('active', button.dataset.ownerDistrict === ownerDistrict));
+        const trigger = ownersTable.querySelector('[data-owner-filter="district"]');
+        trigger.classList.toggle('active', Boolean(ownerDistrict));
+        trigger.setAttribute('aria-expanded', 'false');
+        districtMenu.hidden = true;
+        applyOwnerFilters();
+      }
+    });
+    document.addEventListener('click', event => {
+      if (!ownersTable || event.target.closest('.owner-filter-heading')) return;
+      const menu = ownersTable.querySelector('.owner-district-menu');
+      if (menu) menu.hidden = true;
+      ownersTable.querySelector('[data-owner-filter="district"]')?.setAttribute('aria-expanded', 'false');
+    });
+    const tableSearchInput = document.getElementById('table-search-input');
+    if (tableSearchInput) {
+      const table = document.querySelector(tableSearchInput.dataset.searchTable);
+      const searchableRows = [...(table?.querySelectorAll(tableSearchInput.dataset.searchRows) || [])];
+      const searchStatus = document.getElementById('table-search-status');
+      const applyTableSearch = () => {
+        if (table === ownersTable) {
+          applyOwnerFilters();
+          return;
+        }
+        const query = tableSearchInput.value.trim().toLocaleLowerCase();
+        let visible = 0;
+        searchableRows.forEach(row => {
+          const matches = !query || row.textContent.toLocaleLowerCase().includes(query);
+          row.hidden = !matches;
+          if (matches) visible += 1;
+        });
+        searchStatus.textContent = query ? `${visible} of ${searchableRows.length} shown` : `${searchableRows.length} total`;
+      };
+      tableSearchInput.addEventListener('input', applyTableSearch);
+      tableSearchInput.addEventListener('keydown', event => {
+        if (event.key !== 'Escape') return;
+        tableSearchInput.value = '';
+        applyTableSearch();
+      });
+      applyTableSearch();
+    }
     document.querySelector('.owners-table')?.addEventListener('focusout', event => {
       const cell = event.target.closest('.owner-cell');
       if (cell) saveOwnerCell(cell).catch(error => alert(error.message));
@@ -374,6 +611,77 @@
       if (!response.ok) throw new Error(result.error || 'Could not save apartment review');
       return result;
     };
+    document.querySelectorAll('.agent-reassign').forEach(select => { select.dataset.savedValue = select.value; });
+    const selectedTransferRows = () => [...document.querySelectorAll('.apartment-row .transfer-apartment-checkbox:checked')]
+      .map(checkbox => checkbox.closest('.apartment-row'));
+    const updateTransferSelection = () => {
+      const rows = selectedTransferRows();
+      const count = document.getElementById('transfer-selection-count');
+      const button = document.getElementById('bulk-transfer-button');
+      const selectAll = document.getElementById('select-all-apartments');
+      if (count) count.textContent = `${rows.length} selected`;
+      if (button) button.disabled = rows.length === 0;
+      if (selectAll) {
+        const visible = [...document.querySelectorAll('.apartment-row:not([hidden]) .transfer-apartment-checkbox')];
+        selectAll.checked = visible.length > 0 && visible.every(checkbox => checkbox.checked);
+        selectAll.indeterminate = rows.length > 0 && !selectAll.checked;
+      }
+    };
+    document.getElementById('select-all-apartments')?.addEventListener('change', event => {
+      document.querySelectorAll('.apartment-row:not([hidden]) .transfer-apartment-checkbox').forEach(checkbox => {
+        checkbox.checked = event.currentTarget.checked;
+      });
+      updateTransferSelection();
+    });
+    document.querySelector('.results-table')?.addEventListener('change', async event => {
+      if (event.target.matches('.transfer-apartment-checkbox')) {
+        updateTransferSelection();
+        return;
+      }
+      const select = event.target.closest('.agent-reassign');
+      if (!select) return;
+      const row = select.closest('.apartment-row');
+      const previous = select.dataset.savedValue || '';
+      select.disabled = true;
+      reviewInteractionUntil = Date.now() + 5000;
+      try {
+        await saveReview(row, 'reassign', '', { agentId: select.value });
+        select.dataset.savedValue = select.value;
+        select.classList.add('saved');
+        setTimeout(() => select.classList.remove('saved'), 1200);
+      } catch (error) {
+        select.value = previous;
+        alert(error.message);
+      } finally {
+        select.disabled = false;
+      }
+    });
+    document.getElementById('bulk-transfer-button')?.addEventListener('click', async event => {
+      const button = event.currentTarget;
+      const select = document.getElementById('bulk-transfer-agent');
+      const targetName = select.options[select.selectedIndex]?.textContent;
+      const rows = selectedTransferRows();
+      const apartments = rows.map(row => ({ id: row.dataset.apartmentId, source: row.dataset.apartmentSource }));
+      if (!apartments.length) return alert('Select at least one apartment to transfer.');
+      if (!select.value) return alert('Choose the agent who should receive these apartments.');
+      if (!confirm(`Transfer ${apartments.length} selected apartment(s) to ${targetName}?`)) return;
+      button.disabled = true;
+      select.disabled = true;
+      try {
+        const response = await fetch('/api/apartments/reassign', {
+          method: 'POST', headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ fromAgentId: button.dataset.fromAgent, toAgentId: select.value, apartments })
+        });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Could not transfer apartments');
+        alert(`Transferred ${result.transferred} selected apartment(s) to ${result.agentName}.`);
+        location.reload();
+      } catch (error) {
+        button.disabled = false;
+        select.disabled = false;
+        alert(error.message);
+      }
+    });
     document.getElementById('dashboard-content').addEventListener('click', async event => {
       const clickedRow = event.target.closest('tr[data-apartment-id]');
       if (!clickedRow) return;
@@ -383,6 +691,27 @@
       if (!row) return;
       reviewInteractionUntil = Date.now() + 10000;
       try {
+        if (event.target.closest('.update-comment')) {
+          const button = event.target.closest('.update-comment');
+          const editor = row.querySelector('.accepted-comment-editor');
+          const comment = editor.value.trim();
+          if (!comment) {
+            alert('Please enter a comment before saving.');
+            editor.focus();
+            return;
+          }
+          reviewInteractionUntil = Date.now() + 5 * 60 * 1000;
+          button.disabled = true;
+          button.textContent = 'Saving…';
+          await saveReview(row, 'update-comment', comment);
+          button.textContent = 'Saved';
+          editor.defaultValue = comment;
+          setTimeout(() => {
+            button.disabled = false;
+            button.textContent = 'Save comment';
+          }, 1000);
+          return;
+        }
         if (event.target.closest('.reject-button')) {
           if (!confirm('Reject and remove this apartment from your list?')) return;
           await saveReview(row, 'rejected');
@@ -390,15 +719,39 @@
           return;
         }
         if (event.target.closest('.accept-button')) {
-          const button = event.target.closest('.accept-button');
-          if (button.classList.contains('selected')) return;
+          if (!commentRow) return;
+          document.querySelectorAll('tbody tr.comment-row').forEach(candidate => {
+            if (candidate !== commentRow) candidate.hidden = true;
+          });
+          commentRow.hidden = false;
+          commentRow.querySelector('.review-comment').focus();
+          return;
+        }
+        if (event.target.closest('.cancel-comment')) {
+          commentRow.hidden = true;
+          return;
+        }
+        if (event.target.closest('.save-comment')) {
+          const comment = commentRow.querySelector('.review-comment').value.trim();
+          if (!comment) {
+            alert('Please add a comment before moving this apartment to Ready For Upload.');
+            commentRow.querySelector('.review-comment').focus();
+            return;
+          }
+          const button = event.target.closest('.save-comment');
+          button.disabled = true;
+          button.textContent = 'Moving…';
+          await saveReview(row, 'accepted', comment);
           row.classList.add('review-accepting');
-          await saveReview(row, 'accepted', '');
-          button.classList.add('selected');
-          button.setAttribute('aria-pressed', 'true');
-          button.title = 'Accepted';
-          row.classList.add('review-accepted');
-          setTimeout(() => row.classList.remove('review-accepting'), 650);
+          setTimeout(() => {
+            commentRow.remove();
+            row.remove();
+            const currentCount = Number(document.getElementById('listing-count').textContent) || 0;
+            document.getElementById('listing-count').textContent = String(Math.max(0, currentCount - 1));
+            if (!document.querySelector('tr.apartment-row')) {
+              document.getElementById('dashboard-content').innerHTML = '<div class="empty">No apartments waiting for review.</div>';
+            }
+          }, 300);
           return;
         }
       } catch (error) {
@@ -407,7 +760,7 @@
     });
     setInterval(() => {
       const editingReview = document.activeElement.closest?.('.comment-row');
-      if (!ownersView && watcherConfig?.enabled && !editingReview && Date.now() > reviewInteractionUntil && !document.activeElement.closest?.('.admin-controls')) location.reload();
+      if (!ownersView && !teamView && !wordImportInProgress && watcherConfig?.enabled && !editingReview && Date.now() > reviewInteractionUntil && !document.activeElement.closest?.('.admin-controls')) location.reload();
     }, 3000);
   </script>
 </body>

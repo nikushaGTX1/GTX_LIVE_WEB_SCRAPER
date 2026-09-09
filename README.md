@@ -28,7 +28,7 @@ apartments. Existing records are preserved even if the watcher state file must b
 rebuilt or the district configuration changes.
 
 Authenticated dashboard admins can paste another filtered MyHome URL, select
-1–10 pages, set a polling interval (minimum 3 seconds), and pause or start MyHome
+1–100 pages, set a polling interval (minimum 3 seconds), and pause or start MyHome
 scraping. These controls are stored in `watcher-config.json` and survive restarts.
 On Railway, users authenticate through the configured dashboard authentication
 mode, and only accounts resolved as admins can change these settings.
@@ -57,8 +57,12 @@ Admins and managers have an `Accepted apartments` management view at
 `/?view=accepted`. Clicking ✓ immediately marks the apartment accepted. The Accepted apartments view is a strict accepted-only subset, while All apartments continues to show every non-rejected scraped apartment. The queue includes accepted apartments across every agent plus the saved
 comment, reviewer email, and review time. Managers are restricted to this accepted
 queue; admins can switch between all and accepted views.
-The management navigation includes `Copy accepted links`, which copies every
-accepted MyHome/SS.ge URL together with its saved comment. The accepted queue
+The management navigation includes separate copy buttons for apartments received
+today, yesterday, and exactly three days ago. Each non-overlapping group copies
+accepted MyHome/SS.ge URLs together with their saved comments. The apartment's
+received date (`first_seen`) is visible in both apartment views. These buttons are
+available to every role; agents copy only their own assigned apartments, while
+admins and managers copy the complete matching group. The accepted queue
 shows comments and reviewer details directly to admins/managers, and clipboard
 output uses a `link` line followed by `Comment: ...` for each apartment.
 The Stop button safely ends an active import after its current apartment, retains
@@ -91,7 +95,7 @@ node main.js --url "https://www.myhome.ge/your-search-url" --pages 5
 
 Paste the complete URL after applying any filters on MyHome. The watcher passes
 all query-string filters to every page and changes only the `page` value. It scans
-five pages by default; `--pages` accepts values from 1 through 10. Changing the
+five pages by default; `--pages` accepts values from 1 through 100. Changing the
 URL or page count updates the persisted search configuration. Every listing from
 the selected page range is imported, not only newly posted listings.
 
@@ -107,28 +111,9 @@ configuration as manually pasted URLs.
 
 ## Website API integration
 
-New MyHome apartments can be uploaded to the Website API and distributed in a
-stable round-robin across all configured agents. Set:
-
-```text
-WEBSITE_API_URL=https://websiteapi-production-c970.up.railway.app
-WEBSITE_API_EMAIL=agent@example.com
-WEBSITE_API_PASSWORD=your_password
-WEBSITE_API_AGENT_IDS=agent-id-1,agent-id-2,agent-id-3,agent-id-4,agent-id-5,agent-id-6,agent-id-7,agent-id-8
-AGENT_DISTRIBUTION_COUNT=8
-DASHBOARD_DISPLAY_USER=Administrator
-```
-
-The account must be able to log in and access both `/api/Agents` and
-`/api/Apartments`. Uploaded records store their assigned agent locally, and failed
-uploads are retried. If the credentials are omitted, API uploading is disabled.
-Set `WEBSITE_API_AGENT_IDS` to control which agents participate and their assignment
-order. The scraper requires the number set by `AGENT_DISTRIBUTION_COUNT` (eight by
-default). If IDs are omitted, the first eight agents sorted by ID are used. The scraper dashboard shows all apartments and the agent
-ID assigned to each one; API-wide admin visibility is governed by the admin account's
-permissions in the Website API.
-The dashboard displays `DASHBOARD_DISPLAY_USER`, or the API login email when no
-display name is configured, so viewers can see which account the scraper uses.
+Scraped MyHome and SS.ge records stay in the scraper's private dataset and are
+never published to the Velven Apartments API. Website API credentials may still
+be used for dashboard authentication, but they do not enable apartment uploads.
 
 Do not poll aggressively. MyHome can change its layout or access controls; the
 scraper reports individual listings it cannot parse and continues watching.
@@ -166,11 +151,12 @@ if the API token does not include an admin role. Other authenticated users are
 treated as agents and filtered by their authenticated user ID.
 
 API clients may send the same Website API JWT as `Authorization: Bearer <token>`.
-`POST /api/owners/upsert` accepts `{ "row": [...] }`, identifies the central
-Administrator owner record by the first (owner ID) column, and atomically inserts
-it or merges its non-empty values. This is the endpoint used by the browser
-extension so uploads made while connected as an Agent still appear in the
-Administrator Owners view and MyHome/SS.ge IDs safely accumulate in one row.
+`POST /api/owners/upsert` accepts `{ "row": [...] }`, identifies the owner record
+by the first (owner ID) column, and inserts it or merges its non-empty values into
+both the authenticated Agent's Owners database and the central Administrator
+database. This is the endpoint used by the browser extension, so the uploading
+Agent and administrators both see the row while MyHome/SS.ge IDs safely
+accumulate in one record.
 The first Administrator read migrates rows written by older per-account versions
 into this central database.
 

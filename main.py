@@ -335,8 +335,8 @@ def main() -> int:
     if args.interval < 30:
         print("For responsible polling, --interval must be at least 30 seconds.")
         return 2
-    if not 1 <= args.pages <= 10:
-        print("--pages must be between 1 and 10.")
+    if not 1 <= args.pages <= 100:
+        print("--pages must be between 1 and 100.")
         return 2
 
     connection = db_connect(DB_PATH)
