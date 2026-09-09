@@ -249,7 +249,7 @@ h1 {
   margin-bottom: 14px;
 }
 
-.district-filter {
+.district-filter, .clear-pending-apartments {
   padding: 9px 14px;
   border: 1px solid var(--line);
   border-radius: 999px;
@@ -260,6 +260,9 @@ h1 {
   font-size: 13px;
   font-weight: 600;
 }
+
+.clear-pending-apartments { color: #b42318; border-color: #fecaca; }
+.clear-pending-apartments:disabled { opacity: .6; cursor: wait; }
 
 .district-control {
   display: inline-flex;

@@ -84,6 +84,7 @@
     </section>
 
     <nav class="district-filters" aria-label="Filter apartments by district">
+      <button id="clear-pending-apartments" class="clear-pending-apartments" type="button" hidden>Clear all pending apartments</button>
       <button class="district-filter active" type="button" data-district="all">All</button>
       <span class="district-control"><button class="district-filter" type="button" data-district="Saburtalo">Saburtalo</button><button class="district-remove" type="button" data-district="Saburtalo" aria-label="Remove every Saburtalo apartment" title="Remove every Saburtalo apartment" hidden>×</button></span>
       <span class="district-control"><button class="district-filter" type="button" data-district="Vake">Vake</button><button class="district-remove" type="button" data-district="Vake" aria-label="Remove every Vake apartment" title="Remove every Vake apartment" hidden>×</button></span>
@@ -186,6 +187,7 @@
       watcherConfig = config;
       document.getElementById('admin-controls').hidden = ownersView || teamView || !config.canAdmin;
       document.querySelectorAll('.district-remove').forEach(button => { button.hidden = !config.canAdmin; });
+      document.getElementById('clear-pending-apartments').hidden = !config.canAdmin || managementNav.dataset.currentView !== 'all';
       managementNav.hidden = false;
       managementNav.querySelectorAll('[data-management-role]').forEach(item => { item.hidden = !config.canManage; });
       managementNav.querySelectorAll('[data-management-only]').forEach(item => {
@@ -280,6 +282,26 @@
     };
     fetch('/api/watcher/config').then(response => response.json()).then(showWatcherConfig)
       .catch(error => { message.textContent = error.message; });
+    document.getElementById('clear-pending-apartments').addEventListener('click', async event => {
+      const button = event.currentTarget;
+      if (!confirm('Clear all pending apartments from every district and both sources? Ready For Upload and Owners will be kept.')) return;
+      reviewInteractionUntil = Date.now() + 5 * 60 * 1000;
+      button.disabled = true;
+      button.setAttribute('aria-busy', 'true');
+      try {
+        const response = await fetch('/api/apartments?scope=all-pending', { method: 'DELETE' });
+        const result = await response.json();
+        if (!response.ok) throw new Error(result.error || 'Could not clear pending apartments');
+        alert(`Cleared ${result.removed} pending apartment(s) across all districts. Ready For Upload and Owners were preserved.`);
+        location.reload();
+      } catch (error) {
+        alert(error.message);
+      } finally {
+        button.disabled = false;
+        button.removeAttribute('aria-busy');
+        reviewInteractionUntil = Date.now() + 10000;
+      }
+    });
     document.querySelector('.district-filters').addEventListener('click', async event => {
       const button = event.target.closest('.district-remove');
       if (!button) return;

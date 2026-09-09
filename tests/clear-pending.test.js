@@ -1,0 +1,61 @@
+const test = require('node:test');
+const assert = require('node:assert/strict');
+const fs = require('node:fs');
+const path = require('node:path');
+const vm = require('node:vm');
+
+const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+const route = source.slice(source.indexOf("    if (pathname === '/api/apartments' && request.method === 'DELETE')"), source.indexOf("    if (pathname === '/api/apartments/import-word'"));
+
+function run(query, role = 'admin') {
+  const myhome = {
+    waiting: { district: 'Vake' },
+    other: { district: 'Unlisted district' },
+    ready: { district: 'Vake', _review_status: 'accepted' },
+    uploaded: { district: 'Vake', _review_status: 'accepted', _website_api_apartment_id: 123 },
+    baseline: { _baseline: true },
+    rejected: { _review_status: 'rejected' }
+  };
+  const ss = { waiting: { district: 'Digomi' }, ready: { _review_status: 'accepted' } };
+  const before = JSON.parse(JSON.stringify({ myhome, ss }));
+  const saves = [];
+  let status, result;
+  vm.runInNewContext(`(function () { ${route} })()`, {
+    pathname: '/api/apartments', request: { method: 'DELETE' },
+    requestUrl: new URL(`http://localhost/api/apartments${query}`),
+    viewer: { role, email: 'admin@test' }, clean: value => String(value || '').trim(),
+    liveMyHomeData: myhome, liveSsData: ss,
+    saveData: data => saves.push(data), SS_DATA_PATH: 'ss.json', SS_CSV_PATH: 'ss.csv',
+    response: { writeHead: code => { status = code; }, end: body => { result = JSON.parse(body); } }
+  });
+  return { myhome, ss, before, saves, status, result };
+}
+
+test('bulk clear removes pending apartments across sources and districts, preserving ready and uploaded records', () => {
+  const r = run('?scope=all-pending');
+  assert.equal(r.status, 200);
+  assert.equal(r.result.removed, 3);
+  assert.equal(r.saves.length, 2);
+  assert.equal(r.myhome.waiting._excluded, true);
+  assert.equal(r.myhome.other._excluded, true);
+  assert.equal(r.ss.waiting._excluded, true);
+  for (const key of ['ready', 'uploaded', 'baseline', 'rejected']) assert.deepEqual(r.myhome[key], r.before.myhome[key]);
+  assert.deepEqual(r.ss.ready, r.before.ss.ready);
+});
+
+test('bulk clear rejects non-admins and missing scope without modifying data', () => {
+  for (const [query, role, status] of [['?scope=all-pending', 'agent', 403], ['?scope=all-pending', 'manager', 403], ['', 'admin', 400]]) {
+    const r = run(query, role);
+    assert.equal(r.status, status);
+    assert.deepEqual({ myhome: r.myhome, ss: r.ss }, r.before);
+    assert.equal(r.saves.length, 0);
+  }
+});
+
+test('district deletion remains limited to the requested district', () => {
+  const r = run('?district=Vake');
+  assert.equal(r.result.removed, 1);
+  assert.deepEqual(r.myhome.other, r.before.myhome.other);
+  assert.deepEqual(r.ss, r.before.ss);
+  assert.deepEqual(r.myhome.ready, r.before.myhome.ready);
+});

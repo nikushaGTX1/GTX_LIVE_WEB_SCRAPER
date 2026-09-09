@@ -980,11 +980,12 @@ function startWebServer() {
     if (pathname === '/api/apartments' && request.method === 'DELETE') {
       if (viewer.role !== 'admin') {
         response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
-        response.end(JSON.stringify({ error: 'Admin access is required to remove a district' }));
+        response.end(JSON.stringify({ error: 'Admin access is required to remove apartments' }));
         return;
       }
       const district = clean(requestUrl.searchParams.get('district'));
-      if (!district) {
+      const allPending = requestUrl.searchParams.get('scope') === 'all-pending';
+      if (!district && !allPending) {
         response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify({ error: 'District is required' }));
         return;
@@ -999,14 +1000,15 @@ function startWebServer() {
       for (const source of sources) {
         let changed = false;
         for (const item of Object.values(source.data)) {
-          if (clean(item.district).toLocaleLowerCase('en-US') !== normalizedDistrict) continue;
+          if (!allPending && clean(item.district).toLocaleLowerCase('en-US') !== normalizedDistrict) continue;
           if (item._review_status === 'accepted') {
             preserved += 1;
             continue;
           }
           if (item._excluded) continue;
+          if (allPending && (item._baseline || item._review_status === 'rejected')) continue;
           item._excluded = true;
-          item._excluded_reason = `District removed by ${viewer.email}`;
+          item._excluded_reason = allPending ? `Pending apartments cleared by ${viewer.email}` : `District removed by ${viewer.email}`;
           item._excluded_at = new Date().toISOString();
           removed += 1;
           changed = true;
