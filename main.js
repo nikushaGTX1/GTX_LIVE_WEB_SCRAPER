@@ -7,6 +7,7 @@ const crypto = require('node:crypto');
 const { pathToFileURL } = require('node:url');
 const { chromium } = require('playwright');
 const { hasExcludedDescription } = require('./description-filter');
+const { belongsToSavedOwner, ownerIdsFromRows } = require('./owner-filter');
 
 const DISTRICT_SEARCHES = [];
 const SEARCH_PRESETS = [
@@ -37,7 +38,7 @@ const IS_HOSTED = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY
 const SS_SCRAPER_ENABLED = String(process.env.ENABLE_SS_SCRAPER || '').toLowerCase() === 'true';
 
 const FIELDS = [
-  'apartment_id', 'district', 'assigned_agent_id', 'title', 'phone', 'price', 'rooms', 'bedrooms', 'area_m2',
+  'apartment_id', 'owner_id', 'district', 'assigned_agent_id', 'title', 'phone', 'price', 'rooms', 'bedrooms', 'area_m2',
   'floor', 'total_floors', 'posted', 'description', 'url', 'first_seen'
 ];
 // MyHome has used both /udzravi-qoneba/25764728/... and
@@ -285,6 +286,10 @@ function ownersData(viewer) {
   return normalizedOwnersData(readJsonFile(accountPath));
 }
 
+function savedOwnerIds() {
+  return ownerIdsFromRows(ownersData({ role: 'admin', email: 'owners-inbox' }).rows);
+}
+
 function buildOwnersContent(viewer) {
   const data = ownersData(viewer);
   const head = `${data.headers.map(header => `<th>${html(header)}</th>`).join('')}<th class="owner-actions-column">Actions</th>`;
@@ -305,10 +310,11 @@ function buildOwnersContent(viewer) {
 }
 
 function buildDashboard(viewer = null, view = 'all') {
+  const ownerIds = savedOwnerIds();
   let combined = [
     ...Object.values(readJsonFile(DATA_PATH)).map(item => ({ ...item, source: item.source || 'MyHome' })),
     ...Object.values(readJsonFile(SS_DATA_PATH)).map(item => ({ ...item, source: 'SS.ge' }))
-  ].filter(item => !item._baseline && !item._excluded && item._review_status !== 'rejected' && !hasExcludedDescription(item.description))
+  ].filter(item => !item._baseline && !item._excluded && item._review_status !== 'rejected' && !hasExcludedDescription(item.description) && !belongsToSavedOwner(item, ownerIds))
     .sort((a, b) => String(b.first_seen).localeCompare(String(a.first_seen)));
   if (view === 'accepted') combined = combined.filter(item => item._review_status === 'accepted');
   const showManagementComments = view === 'accepted';
@@ -817,8 +823,9 @@ function saveData(data, dataPath = DATA_PATH, csvPath = CSV_PATH) {
   fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf8');
   fs.renameSync(tempPath, dataPath);
 
+  const ownerIds = savedOwnerIds();
   const rows = Object.values(data)
-    .filter(row => !row._baseline && !row._excluded && row._review_status !== 'rejected' && !hasExcludedDescription(row.description))
+    .filter(row => !row._baseline && !row._excluded && row._review_status !== 'rejected' && !hasExcludedDescription(row.description) && !belongsToSavedOwner(row, ownerIds))
     .sort((a, b) => String(b.first_seen).localeCompare(String(a.first_seen)));
   const csv = [FIELDS.map(csvCell).join(',')];
   for (const row of rows) csv.push(FIELDS.map(field => csvCell(row[field])).join(','));
@@ -978,6 +985,7 @@ function myHomeApartment(source, id, phone, firstSeen = new Date().toISOString()
   const phoneInfo = myHomePhoneInfo(source);
   return {
     apartment_id: id,
+    owner_id: clean(source.user_id ?? source.userId ?? source.owner_id ?? source.ownerId),
     district,
     source: 'MyHome',
     title: clean(source.dynamic_title),
@@ -1523,8 +1531,10 @@ async function uploadApartmentToWebsite(item) {
 
 async function syncPendingWebsiteApartments(data, state, onlyApartmentId = null, dataPath = DATA_PATH, csvPath = CSV_PATH) {
   if (!process.env.WEBSITE_API_EMAIL || !process.env.WEBSITE_API_PASSWORD) return 0;
+  const ownerIds = savedOwnerIds();
   const pending = Object.values(data)
     .filter(item => !item._baseline && !item._excluded && !item._api_uploaded && !hasExcludedDescription(item.description) &&
+      !belongsToSavedOwner(item, ownerIds) &&
       (onlyApartmentId == null || String(item.apartment_id) === String(onlyApartmentId)))
     .sort((a, b) => String(a.first_seen).localeCompare(String(b.first_seen)));
   if (!pending.length) return 0;
@@ -1568,6 +1578,7 @@ async function extractSsDetail(page, card) {
   const rooms = match(/(\d+\+?)\s*ოთახ/i, source.title || '');
   return {
     apartment_id: card.id,
+    owner_id: clean(source.userId ?? source.user_id ?? source.applicationUserId ?? source.ownerId ?? source.owner_id),
     source: 'SS.ge',
     title: clean(source.title),
     phone,
@@ -1666,6 +1677,15 @@ async function scan(context, data, state, options) {
       watcherStatus.message = `Importing apartment ${index + 1} of ${importQueue.length} (ID ${card.id})…`;
       try {
         const item = await extractDetail(detailPage, card);
+        if (belongsToSavedOwner(item, savedOwnerIds())) {
+          item._baseline = true;
+          item._excluded = true;
+          item._excluded_reason = 'owner_id';
+          data[item.apartment_id] = item;
+          saveData(data);
+          console.log(`FILTERED MyHome ID ${item.apartment_id} because owner ID ${item.owner_id} is already in Owners.`);
+          continue;
+        }
         if (hasExcludedDescription(item.description)) {
           item._baseline = true;
           item._excluded = true;
@@ -1752,6 +1772,15 @@ async function scanSs(context, data, state) {
     for (const card of newest.reverse()) {
       try {
         const item = await extractSsDetail(detailPage, card);
+        if (belongsToSavedOwner(item, savedOwnerIds())) {
+          item._baseline = true;
+          item._excluded = true;
+          item._excluded_reason = 'owner_id';
+          data[item.apartment_id] = item;
+          saveData(data, SS_DATA_PATH, SS_CSV_PATH);
+          console.log(`FILTERED SS.ge ID ${item.apartment_id} because owner ID ${item.owner_id} is already in Owners.`);
+          continue;
+        }
         if (hasExcludedDescription(item.description)) {
           item._baseline = true;
           item._excluded = true;
