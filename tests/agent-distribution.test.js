@@ -47,6 +47,9 @@ test('assignment refreshes active API agents and reassigns inactive pending queu
   assert.match(source, /activeAgentIds\.has\(assignedId\) \|\| !stillPending/);
   assert.match(source, /delete item\.assigned_agent_id/);
   assert.match(source, /item\._reassigned_from_inactive_at = item\._assigned_at/);
+  assert.match(source, /Skipping inactive or non-agent configured Website API IDs/);
+  assert.match(source, /available\.filter\(agent => !configuredAgentIds\.has\(agent\.id\)\)/);
+  assert.doesNotMatch(source, /Configured Website API agent IDs were not found/);
 });
 
 test('Website API upload is attributed to the assigned agent', () => {

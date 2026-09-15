@@ -1901,13 +1901,15 @@ async function getDistributionAgents() {
   if (!Number.isInteger(distributionCount) || distributionCount < 1) {
     throw new Error('AGENT_DISTRIBUTION_COUNT must be a positive whole number');
   }
+  const configuredAgents = configuredIds.map(id => available.find(agent => agent.id === id)).filter(Boolean);
+  const configuredAgentIds = new Set(configuredAgents.map(agent => agent.id));
   websiteApiAgents = configuredIds.length
-    ? configuredIds.map(id => available.find(agent => agent.id === id)).filter(Boolean)
+    ? [...configuredAgents, ...available.filter(agent => !configuredAgentIds.has(agent.id))].slice(0, distributionCount)
     : available.slice(0, distributionCount);
-  if (configuredIds.length && websiteApiAgents.length !== configuredIds.length) {
-    const found = new Set(websiteApiAgents.map(agent => agent.id));
+  if (configuredIds.length && configuredAgents.length !== configuredIds.length) {
+    const found = new Set(configuredAgents.map(agent => agent.id));
     const missing = configuredIds.filter(id => !found.has(id));
-    throw new Error(`Configured Website API agent IDs were not found: ${missing.join(', ')}`);
+    console.warn(`Skipping inactive or non-agent configured Website API IDs: ${missing.join(', ')}`);
   }
   if (!websiteApiAgents.length) throw new Error('Round-robin could not resolve any agents');
   if (!configuredIds.length && websiteApiAgents.length < distributionCount) {
