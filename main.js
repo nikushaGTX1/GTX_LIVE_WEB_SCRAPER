@@ -1887,7 +1887,6 @@ async function loginWebsiteApi() {
 }
 
 async function getDistributionAgents() {
-  if (websiteApiAgents.length) return websiteApiAgents;
   if (!websiteApiToken && !await loginWebsiteApi()) return [];
   const payload = await websiteApiRequest('/api/Agents');
   const available = responseItems(payload)
@@ -1942,17 +1941,34 @@ function districtFromListingUrl(value) {
 
 async function assignPendingApartments(data, state, dataPath = DATA_PATH, csvPath = CSV_PATH) {
   if (!process.env.WEBSITE_API_EMAIL || !process.env.WEBSITE_API_PASSWORD) return 0;
+  const agents = await getDistributionAgents();
+  const activeAgentIds = new Set(agents.map(agent => String(agent.id)));
+  let released = 0;
+  for (const item of Object.values(data)) {
+    const assignedId = String(item.assigned_agent_id || '');
+    const stillPending = !item._baseline && !item._excluded && !['accepted', 'rejected'].includes(item._review_status) &&
+      !item._api_uploaded && !(item._listing_uploads || []).length;
+    if (!assignedId || activeAgentIds.has(assignedId) || !stillPending) continue;
+    item._previous_inactive_agent_id = assignedId;
+    item._previous_inactive_agent_name = item.assigned_agent_name || '';
+    delete item.assigned_agent_id;
+    delete item.assigned_agent_name;
+    released += 1;
+  }
   const pending = Object.values(data)
     .filter(item => !item._baseline && !item._excluded && !item.assigned_agent_id && !hasExcludedDescription(item.description))
     .sort((a, b) => String(a.first_seen).localeCompare(String(b.first_seen)));
-  if (!pending.length) return 0;
-  const agents = await getDistributionAgents();
+  if (!pending.length) {
+    if (released) saveData(data, dataPath, csvPath);
+    return 0;
+  }
   for (const item of pending) {
     const index = Number(state.api_assignment_index || 0) % agents.length;
     const agent = agents[index];
     item.assigned_agent_id = agent.id;
     item.assigned_agent_name = agentDisplayName(agent);
     item._assigned_at = new Date().toISOString();
+    if (item._previous_inactive_agent_id) item._reassigned_from_inactive_at = item._assigned_at;
     delete item._assignment_error;
     state.api_assignment_index = Number(state.api_assignment_index || 0) + 1;
   }

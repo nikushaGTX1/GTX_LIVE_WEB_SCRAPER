@@ -39,6 +39,16 @@ test('pending apartments are persistently assigned in round-robin order', () => 
   assert.match(source, /saveData\(data, dataPath, csvPath\);\s*saveState\(state\)/);
 });
 
+test('assignment refreshes active API agents and reassigns inactive pending queues', () => {
+  const distributionStart = source.indexOf('async function getDistributionAgents');
+  const distributionEnd = source.indexOf('async function hydrateAssignedAgentNames');
+  assert.doesNotMatch(source.slice(distributionStart, distributionEnd), /if \(websiteApiAgents\.length\) return websiteApiAgents/);
+  assert.match(source, /const activeAgentIds = new Set\(agents\.map\(agent => String\(agent\.id\)\)\)/);
+  assert.match(source, /activeAgentIds\.has\(assignedId\) \|\| !stillPending/);
+  assert.match(source, /delete item\.assigned_agent_id/);
+  assert.match(source, /item\._reassigned_from_inactive_at = item\._assigned_at/);
+});
+
 test('Website API upload is attributed to the assigned agent', () => {
   assert.match(source, /async function uploadApartmentToWebsite\(item, agentId\)/);
   assert.match(source, /form\.set\('UploadedByUserId', agentId\)/);
