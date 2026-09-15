@@ -189,7 +189,7 @@
       document.querySelectorAll('.district-remove').forEach(button => { button.hidden = !config.canAdmin; });
       const clearPendingButton = document.getElementById('clear-pending-apartments');
       clearPendingButton.hidden = managementNav.dataset.currentView !== 'all';
-      clearPendingButton.textContent = config.canManage ? 'Remove all pending apartments' : 'Clear my pending apartments';
+      clearPendingButton.textContent = config.canManage ? 'Reset scraped apartments' : 'Clear my pending apartments';
       managementNav.hidden = false;
       managementNav.querySelectorAll('[data-management-role]').forEach(item => { item.hidden = !config.canManage; });
       managementNav.querySelectorAll('[data-management-only]').forEach(item => {
@@ -288,7 +288,7 @@
       const button = event.currentTarget;
       const globalRemoval = watcherConfig?.canManage;
       const prompt = globalRemoval
-        ? 'Remove all pending apartments for every agent, district, and source? Ready For Upload and Owners will be kept.'
+        ? 'Reset all previously scraped apartments for every agent and source? Ready For Upload and Owners will be kept. Rejected IDs will stay blocked.'
         : 'Clear only your pending apartments from every district and source? Other agents, Ready For Upload, and Owners will be kept.';
       if (!confirm(prompt)) return;
       reviewInteractionUntil = Date.now() + 5 * 60 * 1000;
@@ -299,7 +299,7 @@
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'Could not clear pending apartments');
         alert(globalRemoval
-          ? `Removed ${result.removed} pending apartment(s) across all agents and districts. Ready For Upload and Owners were preserved.`
+          ? `Reset ${result.removed} scraped apartment record(s). Ready For Upload and Owners were preserved; the scraper can now discover active listings again.`
           : `Cleared ${result.removed} of your pending apartment(s). Other agents were not affected.`);
         location.reload();
       } catch (error) {

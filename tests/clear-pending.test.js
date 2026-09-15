@@ -33,15 +33,17 @@ function run(query, role = 'admin') {
   return { myhome, ss, before, saves, status, result };
 }
 
-test('bulk clear removes pending apartments across sources and districts, preserving ready and uploaded records', () => {
+test('bulk reset removes scrape history across sources and districts, preserving ready records', () => {
   const r = run('?scope=all-pending');
   assert.equal(r.status, 200);
-  assert.equal(r.result.removed, 3);
+  assert.equal(r.result.removed, 5);
   assert.equal(r.saves.length, 2);
   assert.equal(r.myhome.waiting, undefined);
   assert.equal(r.myhome.other, undefined);
   assert.equal(r.ss.waiting, undefined);
-  for (const key of ['ready', 'uploaded', 'baseline', 'rejected']) assert.deepEqual(r.myhome[key], r.before.myhome[key]);
+  for (const key of ['ready', 'uploaded']) assert.deepEqual(r.myhome[key], r.before.myhome[key]);
+  assert.equal(r.myhome.baseline, undefined);
+  assert.equal(r.myhome.rejected, undefined);
   assert.deepEqual(r.ss.ready, r.before.ss.ready);
 });
 
@@ -57,7 +59,7 @@ test('agent bulk clear removes only that agent pending apartments', () => {
 test('manager bulk clear has global scope and missing scope is rejected', () => {
   const manager = run('?scope=all-pending', 'manager');
   assert.equal(manager.status, 200);
-  assert.equal(manager.result.removed, 3);
+  assert.equal(manager.result.removed, 5);
   for (const [query, role, status] of [['', 'admin', 400], ['', 'agent', 400]]) {
     const r = run(query, role);
     assert.equal(r.status, status);

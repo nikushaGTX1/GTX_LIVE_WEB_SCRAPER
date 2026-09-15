@@ -1104,8 +1104,7 @@ function startWebServer() {
             preserved += 1;
             continue;
           }
-          if (item._excluded) continue;
-          if (allPending && (item._baseline || item._review_status === 'rejected')) continue;
+          if (!allPending && item._excluded) continue;
           if (allPending) forgetRemovedApartment(item, source.name);
           else rememberRemovedApartment(item, source.name, viewer);
           delete source.data[itemKey];
