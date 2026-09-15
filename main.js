@@ -405,6 +405,12 @@ function rememberRemovedApartment(item, source, viewer) {
   fs.writeFileSync(REMOVED_APARTMENTS_PATH, JSON.stringify(registry, null, 2), 'utf8');
 }
 
+function forgetRemovedApartment(item, source) {
+  const registry = removedApartmentRegistry();
+  delete registry[apartmentRegistryKey(source, item.apartment_id)];
+  fs.writeFileSync(REMOVED_APARTMENTS_PATH, JSON.stringify(registry, null, 2), 'utf8');
+}
+
 function rememberRejectedApartment(item, source, viewer) {
   const registry = rejectedApartmentRegistry();
   const key = apartmentRegistryKey(source, item.apartment_id);
@@ -1080,6 +1086,9 @@ function startWebServer() {
         return;
       }
       const normalizedDistrict = district.toLocaleLowerCase('en-US');
+      if (allPending && canRemoveGlobally) {
+        fs.writeFileSync(REMOVED_APARTMENTS_PATH, '{}\n', 'utf8');
+      }
       const sources = [
         { name: 'MyHome', data: liveMyHomeData || loadData(), save: data => saveData(data) },
         { name: 'SS.ge', data: liveSsData || loadSsData(), save: data => saveData(data, SS_DATA_PATH, SS_CSV_PATH) }
@@ -1097,7 +1106,8 @@ function startWebServer() {
           }
           if (item._excluded) continue;
           if (allPending && (item._baseline || item._review_status === 'rejected')) continue;
-          rememberRemovedApartment(item, source.name, viewer);
+          if (allPending) forgetRemovedApartment(item, source.name);
+          else rememberRemovedApartment(item, source.name, viewer);
           delete source.data[itemKey];
           removed += 1;
           changed = true;

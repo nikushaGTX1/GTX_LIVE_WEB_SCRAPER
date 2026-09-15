@@ -25,6 +25,7 @@ function run(query, role = 'admin') {
     requestUrl: new URL(`http://localhost/api/apartments${query}`),
     viewer: { role, email: 'viewer@test', agentId: 'agent-1' }, clean: value => String(value || '').trim(),
     rememberRemovedApartment: () => {},
+    forgetRemovedApartment: () => {}, fs: { writeFileSync: () => {} }, REMOVED_APARTMENTS_PATH: 'removed.json',
     liveMyHomeData: myhome, liveSsData: ss,
     saveData: data => saves.push(data), SS_DATA_PATH: 'ss.json', SS_CSV_PATH: 'ss.csv',
     response: { writeHead: code => { status = code; }, end: body => { result = JSON.parse(body); } }
@@ -73,7 +74,8 @@ test('district deletion remains limited to the requested district', () => {
   assert.deepEqual(r.myhome.ready, r.before.myhome.ready);
 });
 
-test('removed apartment IDs are recorded before queue deletion', () => {
-  assert.match(route, /rememberRemovedApartment\(item, source\.name, viewer\)/);
+test('bulk pending clear is not saved as a duplicate, while district removal is', () => {
+  assert.match(route, /if \(allPending\) forgetRemovedApartment\(item, source\.name\)/);
+  assert.match(route, /else rememberRemovedApartment\(item, source\.name, viewer\)/);
   assert.match(source, /const REMOVED_APARTMENTS_PATH = path\.join\(DATA_ROOT, 'removed-apartments\.json'\)/);
 });

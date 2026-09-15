@@ -18,8 +18,9 @@ test('reject action writes a durable rejection registry entry', () => {
   assert.match(source, /fs\.writeFileSync\(REJECTED_APARTMENTS_PATH/);
 });
 
-test('manually removed apartment IDs are permanent scraper duplicates', () => {
+test('district-removed apartment IDs are scraper duplicates but bulk-cleared IDs are forgotten', () => {
   assert.match(source, /function rememberRemovedApartment\(item, source, viewer\)/);
+  assert.match(source, /function forgetRemovedApartment\(item, source\)/);
   assert.match(source, /Object\.keys\(removedApartmentRegistry\(\)\)/);
   assert.doesNotMatch(source, /restoreAccidentallyExcludedApartments/);
 });
