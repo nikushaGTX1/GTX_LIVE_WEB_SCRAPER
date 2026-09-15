@@ -52,6 +52,14 @@ test('assignment refreshes active API agents and reassigns inactive pending queu
   assert.doesNotMatch(source, /Configured Website API agent IDs were not found/);
 });
 
+test('all active agents receive apartments while admin and manager roles are excluded', () => {
+  assert.match(source, /function isAssignableApiAgent\(agent\)/);
+  assert.match(source, /if \(role\) return \/\(\^\|\[ _-\]\)agent/);
+  assert.match(source, /\.filter\(agent => agent\.id && isAssignableApiAgent\(agent\)\)/);
+  assert.doesNotMatch(source, /slice\(0, distributionCount\)/);
+  assert.doesNotMatch(source, /AGENT_DISTRIBUTION_COUNT/);
+});
+
 test('Website API upload is attributed to the assigned agent', () => {
   assert.match(source, /async function uploadApartmentToWebsite\(item, agentId\)/);
   assert.match(source, /form\.set\('UploadedByUserId', agentId\)/);

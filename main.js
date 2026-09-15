@@ -1853,6 +1853,14 @@ function agentDisplayName(agent) {
     [person?.firstName, person?.lastName].filter(Boolean).join(' ') || person?.email || agent?.id);
 }
 
+function isAssignableApiAgent(agent) {
+  const person = agent?.user || agent?.profile || agent;
+  const rawRole = person?.role || person?.crmRole || person?.userRole || person?.roleName || person?.userType || person?.accountType || agent?.role;
+  const role = clean(typeof rawRole === 'object' ? (rawRole?.name || rawRole?.role || rawRole?.type) : rawRole).toLowerCase();
+  if (role) return /(^|[ _-])agent($|[ _-])/.test(role);
+  return !/(^|\s)(admin(?:istrator)?|manager)(\s|$)/i.test(agentDisplayName(agent));
+}
+
 async function websiteApiRequest(pathname, options = {}, retry = true) {
   const headers = new Headers(options.headers || {});
   if (websiteApiToken) headers.set('authorization', `Bearer ${websiteApiToken}`);
@@ -1892,29 +1900,22 @@ async function getDistributionAgents() {
   const payload = await websiteApiRequest('/api/Agents');
   const available = responseItems(payload)
     .map(agent => ({ ...agent, id: String(agent.userId ?? agent.user_id ?? agent.user?.id ?? agent.id ?? '') }))
-    .filter(agent => agent.id)
+    .filter(agent => agent.id && isAssignableApiAgent(agent))
     .sort((a, b) => a.id.localeCompare(b.id));
   websiteDirectoryAgents = available;
   const configuredIds = String(process.env.WEBSITE_API_AGENT_IDS || '')
     .split(',').map(value => value.trim()).filter(Boolean);
-  const distributionCount = Number(process.env.AGENT_DISTRIBUTION_COUNT || 8);
-  if (!Number.isInteger(distributionCount) || distributionCount < 1) {
-    throw new Error('AGENT_DISTRIBUTION_COUNT must be a positive whole number');
-  }
   const configuredAgents = configuredIds.map(id => available.find(agent => agent.id === id)).filter(Boolean);
   const configuredAgentIds = new Set(configuredAgents.map(agent => agent.id));
   websiteApiAgents = configuredIds.length
-    ? [...configuredAgents, ...available.filter(agent => !configuredAgentIds.has(agent.id))].slice(0, distributionCount)
-    : available.slice(0, distributionCount);
+    ? [...configuredAgents, ...available.filter(agent => !configuredAgentIds.has(agent.id))]
+    : available;
   if (configuredIds.length && configuredAgents.length !== configuredIds.length) {
     const found = new Set(configuredAgents.map(agent => agent.id));
     const missing = configuredIds.filter(id => !found.has(id));
     console.warn(`Skipping inactive or non-agent configured Website API IDs: ${missing.join(', ')}`);
   }
   if (!websiteApiAgents.length) throw new Error('Round-robin could not resolve any agents');
-  if (!configuredIds.length && websiteApiAgents.length < distributionCount) {
-    console.warn(`Round-robin requested ${distributionCount} agents but resolved ${websiteApiAgents.length}; using all available agents.`);
-  }
   return websiteApiAgents;
 }
 
@@ -1988,7 +1989,7 @@ async function hydrateListingUploadHistory() {
   const agentPayload = await websiteApiRequest('/api/Agents');
   websiteDirectoryAgents = responseItems(agentPayload)
     .map(agent => ({ ...agent, id: String(agent.userId ?? agent.user_id ?? agent.user?.id ?? agent.id ?? '') }))
-    .filter(agent => agent.id);
+    .filter(agent => agent.id && isAssignableApiAgent(agent));
   dashboardUploadAgents = responseItems(agentPayload)
     .map(agent => ({
       id: String(agent.userId ?? agent.user_id ?? agent.user?.id ?? agent.id ?? ''),
