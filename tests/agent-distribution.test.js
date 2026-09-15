@@ -15,7 +15,8 @@ test('management includes new API agents outside the automatic distribution pool
     dashboardUploadAgents: [{ id: 'historical', name: 'Former agent' }],
     dashboardAccounts: () => [],
     clean: value => String(value || '').trim(),
-    agentDisplayName: agent => agent.name
+    agentDisplayName: agent => agent.name,
+    agentEmail: agent => agent.email || ''
   });
   vm.runInContext(source.slice(source.indexOf('function managementAgents('), source.indexOf('function buildTeamContent(')), context);
   const agents = vm.runInContext('managementAgents()', context);

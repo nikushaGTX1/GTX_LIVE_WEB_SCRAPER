@@ -29,6 +29,18 @@ test('extension owner uploads feed the authenticated agent and central Administr
   assert.match(source, /rows = mergeOwnerRows\(rows, normalizedOwnersData\(readJsonFile\(legacyPath\)\)\.rows\)/);
 });
 
+test('managers share the complete owner database and team profiles link to each agent owners', () => {
+  assert.match(source, /\['admin', 'manager'\]\.includes\(viewer\?\.role\)\) return ADMIN_OWNERS_PATH/);
+  assert.match(source, /view=owners&agent=\$\{encodeURIComponent\(agent\.id\)\}/);
+  assert.match(source, /buildOwnersContent\(viewer, selectedOwner \|\| viewer\)/);
+});
+
+test('removed queue apartments can be scraped again instead of remaining duplicate exclusions', () => {
+  assert.match(source, /delete source\.data\[itemKey\]/);
+  assert.match(source, /function restoreAccidentallyExcludedApartments\(data\)/);
+  assert.match(source, /Pending apartments cleared/);
+});
+
 test('accepted apartment comments synchronize to matching owner listing IDs', () => {
   assert.match(source, /acceptedComments\.get\(clean\(row\[0\]\)\)/);
   assert.doesNotMatch(source, /acceptedComments\.get\(clean\(row\[(?:6|7)\]\)\)/);

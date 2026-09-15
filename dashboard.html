@@ -84,7 +84,7 @@
     </section>
 
     <nav class="district-filters" aria-label="Filter apartments by district">
-      <button id="clear-pending-apartments" class="clear-pending-apartments" type="button" hidden>Clear all pending apartments</button>
+      <button id="clear-pending-apartments" class="clear-pending-apartments" type="button" hidden>Clear my pending apartments</button>
       <button class="district-filter active" type="button" data-district="all">All</button>
       <span class="district-control"><button class="district-filter" type="button" data-district="Saburtalo">Saburtalo</button><button class="district-remove" type="button" data-district="Saburtalo" aria-label="Remove every Saburtalo apartment" title="Remove every Saburtalo apartment" hidden>×</button></span>
       <span class="district-control"><button class="district-filter" type="button" data-district="Vake">Vake</button><button class="district-remove" type="button" data-district="Vake" aria-label="Remove every Vake apartment" title="Remove every Vake apartment" hidden>×</button></span>
@@ -187,7 +187,9 @@
       watcherConfig = config;
       document.getElementById('admin-controls').hidden = ownersView || teamView || !config.canAdmin;
       document.querySelectorAll('.district-remove').forEach(button => { button.hidden = !config.canAdmin; });
-      document.getElementById('clear-pending-apartments').hidden = !config.canAdmin || managementNav.dataset.currentView !== 'all';
+      const clearPendingButton = document.getElementById('clear-pending-apartments');
+      clearPendingButton.hidden = managementNav.dataset.currentView !== 'all';
+      clearPendingButton.textContent = config.canManage ? 'Remove all pending apartments' : 'Clear my pending apartments';
       managementNav.hidden = false;
       managementNav.querySelectorAll('[data-management-role]').forEach(item => { item.hidden = !config.canManage; });
       managementNav.querySelectorAll('[data-management-only]').forEach(item => {
@@ -284,7 +286,11 @@
       .catch(error => { message.textContent = error.message; });
     document.getElementById('clear-pending-apartments').addEventListener('click', async event => {
       const button = event.currentTarget;
-      if (!confirm('Clear all pending apartments from every district and both sources? Ready For Upload and Owners will be kept.')) return;
+      const globalRemoval = watcherConfig?.canManage;
+      const prompt = globalRemoval
+        ? 'Remove all pending apartments for every agent, district, and source? Ready For Upload and Owners will be kept.'
+        : 'Clear only your pending apartments from every district and source? Other agents, Ready For Upload, and Owners will be kept.';
+      if (!confirm(prompt)) return;
       reviewInteractionUntil = Date.now() + 5 * 60 * 1000;
       button.disabled = true;
       button.setAttribute('aria-busy', 'true');
@@ -292,7 +298,9 @@
         const response = await fetch('/api/apartments?scope=all-pending', { method: 'DELETE' });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'Could not clear pending apartments');
-        alert(`Cleared ${result.removed} pending apartment(s) across all districts. Ready For Upload and Owners were preserved.`);
+        alert(globalRemoval
+          ? `Removed ${result.removed} pending apartment(s) across all agents and districts. Ready For Upload and Owners were preserved.`
+          : `Cleared ${result.removed} of your pending apartment(s). Other agents were not affected.`);
         location.reload();
       } catch (error) {
         alert(error.message);

@@ -9,8 +9,8 @@ const route = source.slice(source.indexOf("    if (pathname === '/api/apartments
 
 function run(query, role = 'admin') {
   const myhome = {
-    waiting: { district: 'Vake' },
-    other: { district: 'Unlisted district' },
+    waiting: { district: 'Vake', assigned_agent_id: 'agent-1' },
+    other: { district: 'Unlisted district', assigned_agent_id: 'agent-2' },
     ready: { district: 'Vake', _review_status: 'accepted' },
     uploaded: { district: 'Vake', _review_status: 'accepted', _website_api_apartment_id: 123 },
     baseline: { _baseline: true },
@@ -23,7 +23,7 @@ function run(query, role = 'admin') {
   vm.runInNewContext(`(function () { ${route} })()`, {
     pathname: '/api/apartments', request: { method: 'DELETE' },
     requestUrl: new URL(`http://localhost/api/apartments${query}`),
-    viewer: { role, email: 'admin@test' }, clean: value => String(value || '').trim(),
+    viewer: { role, email: 'viewer@test', agentId: 'agent-1' }, clean: value => String(value || '').trim(),
     liveMyHomeData: myhome, liveSsData: ss,
     saveData: data => saves.push(data), SS_DATA_PATH: 'ss.json', SS_CSV_PATH: 'ss.csv',
     response: { writeHead: code => { status = code; }, end: body => { result = JSON.parse(body); } }
@@ -36,15 +36,27 @@ test('bulk clear removes pending apartments across sources and districts, preser
   assert.equal(r.status, 200);
   assert.equal(r.result.removed, 3);
   assert.equal(r.saves.length, 2);
-  assert.equal(r.myhome.waiting._excluded, true);
-  assert.equal(r.myhome.other._excluded, true);
-  assert.equal(r.ss.waiting._excluded, true);
+  assert.equal(r.myhome.waiting, undefined);
+  assert.equal(r.myhome.other, undefined);
+  assert.equal(r.ss.waiting, undefined);
   for (const key of ['ready', 'uploaded', 'baseline', 'rejected']) assert.deepEqual(r.myhome[key], r.before.myhome[key]);
   assert.deepEqual(r.ss.ready, r.before.ss.ready);
 });
 
-test('bulk clear rejects non-admins and missing scope without modifying data', () => {
-  for (const [query, role, status] of [['?scope=all-pending', 'agent', 403], ['?scope=all-pending', 'manager', 403], ['', 'admin', 400]]) {
+test('agent bulk clear removes only that agent pending apartments', () => {
+  const r = run('?scope=all-pending', 'agent');
+  assert.equal(r.status, 200);
+  assert.equal(r.result.removed, 1);
+  assert.equal(r.myhome.waiting, undefined);
+  assert.deepEqual(r.myhome.other, r.before.myhome.other);
+  assert.deepEqual(r.ss, r.before.ss);
+});
+
+test('manager bulk clear has global scope and missing scope is rejected', () => {
+  const manager = run('?scope=all-pending', 'manager');
+  assert.equal(manager.status, 200);
+  assert.equal(manager.result.removed, 3);
+  for (const [query, role, status] of [['', 'admin', 400], ['', 'agent', 400]]) {
     const r = run(query, role);
     assert.equal(r.status, status);
     assert.deepEqual({ myhome: r.myhome, ss: r.ss }, r.before);

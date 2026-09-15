@@ -135,10 +135,10 @@ function markExcludedDescriptions(data) {
   return count;
 }
 
-function restoreAcceptedDistrictRemovals(data) {
+function restoreAccidentallyExcludedApartments(data) {
   let restored = 0;
   for (const item of Object.values(data)) {
-    if (item._review_status !== 'accepted' || !item._excluded || !/^District removed by /i.test(item._excluded_reason || '')) continue;
+    if (!item._excluded || !/^(?:District removed|Agent district removed|Pending apartments cleared|All pending apartments cleared|Agent pending apartments cleared) by /i.test(item._excluded_reason || '')) continue;
     delete item._excluded;
     delete item._excluded_reason;
     delete item._excluded_at;
@@ -270,8 +270,13 @@ function ownerAccountKey(viewer) {
 }
 
 function ownersPathFor(viewer) {
-  if (viewer?.role === 'admin') return ADMIN_OWNERS_PATH;
+  if (['admin', 'manager'].includes(viewer?.role)) return ADMIN_OWNERS_PATH;
   return path.join(DATA_ROOT, `owners-${ownerAccountKey(viewer)}.json`);
+}
+
+function agentEmail(agent) {
+  const person = agent?.user || agent?.profile || agent;
+  return clean(person?.email || agent?.email).toLowerCase();
 }
 
 function myHomePhoneInfo(source = {}) {
@@ -380,26 +385,28 @@ function savedOwnerIds() {
   return ownerIdsFromRows(ownersData({ role: 'admin', email: 'owners-inbox' }).rows);
 }
 
-function buildOwnersContent(viewer) {
+function buildOwnersContent(viewer, subject = viewer) {
   const data = ownersData(viewer);
-  const districts = [...new Set(data.rows.map(row => clean(row[2])).filter(Boolean))]
+  const readOnly = ownersPathFor(subject) !== ownersPathFor(viewer);
+  const displayed = readOnly ? ownersData(subject) : data;
+  const districts = [...new Set(displayed.rows.map(row => clean(row[2])).filter(Boolean))]
     .sort((left, right) => left.localeCompare(right, 'ka', { sensitivity: 'base' }));
-  const head = `${data.headers.map((header, columnIndex) => {
+  const head = `${displayed.headers.map((header, columnIndex) => {
     if (columnIndex === 2) return `<th class="owner-filter-heading"><button class="owner-filter-button" type="button" data-owner-filter="district" aria-expanded="false">${html(header)} <span aria-hidden="true">▾</span></button><div class="owner-district-menu" hidden><button type="button" data-owner-district="">ყველა უბანი</button>${districts.map(district => `<button type="button" data-owner-district="${html(district)}">${html(district)}</button>`).join('')}</div></th>`;
     if (columnIndex === 4 || columnIndex === 5) return `<th><button class="owner-filter-button" type="button" data-owner-sort="${columnIndex}" aria-pressed="false">${html(header)} <span aria-hidden="true">↓</span></button></th>`;
     return `<th>${html(header)}</th>`;
-  }).join('')}<th class="owner-actions-column">Actions</th>`;
-  const rows = data.rows.map((row, rowIndex) => `<tr data-owner-row="${rowIndex}">${data.headers.map((_, columnIndex) => `<td class="owner-cell" contenteditable="true" spellcheck="false" data-owner-index="${rowIndex}" data-owner-column="${columnIndex}">${html(row[columnIndex] ?? '')}</td>`).join('')}<td class="owner-row-actions"><button class="owner-remove" type="button" data-owner-index="${rowIndex}" aria-label="Remove owner row">Remove</button></td></tr>`).join('\n');
+  }).join('')}${readOnly ? '' : '<th class="owner-actions-column">Actions</th>'}`;
+  const rows = displayed.rows.map((row, rowIndex) => `<tr data-owner-row="${rowIndex}">${displayed.headers.map((_, columnIndex) => `<td class="owner-cell"${readOnly ? '' : ' contenteditable="true"'} spellcheck="false" data-owner-index="${rowIndex}" data-owner-column="${columnIndex}">${html(row[columnIndex] ?? '')}</td>`).join('')}${readOnly ? '' : `<td class="owner-row-actions"><button class="owner-remove" type="button" data-owner-index="${rowIndex}" aria-label="Remove owner row">Remove</button></td>`}</tr>`).join('\n');
   return `<section class="owners-panel" aria-labelledby="owners-title">
     <div class="owners-toolbar">
-      <div><p class="eyebrow">Owner database</p><h2 id="owners-title">Owners</h2><p id="owners-import-status">${data.rows.length} saved row(s)</p></div>
-      <div class="owners-actions">
+      <div><p class="eyebrow">Owner database</p><h2 id="owners-title">${readOnly ? `${html(subject.name)}'s Owners` : 'Owners'}</h2><p id="owners-import-status">${displayed.rows.length} saved row(s)</p></div>
+      ${readOnly ? '<a href="/?view=team">Back to Team profiles</a>' : `<div class="owners-actions">
         <input id="owners-file" type="file" accept=".xlsx,.xls,.csv" hidden>
         <button id="owners-add-row" type="button">Add row</button>
         <button id="owners-import" class="save-button" type="button">Import Excel</button>
         <button id="owners-append" type="button">Append Excel</button>
         <button id="owners-remove-all" type="button">Remove all</button>
-      </div>
+      </div>`}
     </div>
     <div class="table-search" role="search">
       <label for="table-search-input">Search owners</label>
@@ -416,11 +423,11 @@ function managementAgents(items = []) {
   for (const account of dashboardAccounts()) {
     if (account.role === 'agent' && account.agentId) activeAgentIds.add(String(account.agentId));
   }
-  for (const agent of [...dashboardUploadAgents, ...(websiteDirectoryAgents || []).map(agent => ({ id: agent.id, name: agentDisplayName(agent) }))]) {
-    if (agent.id) agents.set(String(agent.id), { id: String(agent.id), name: clean(agent.name) || String(agent.id), assignable: activeAgentIds.has(String(agent.id)) });
+  for (const agent of [...dashboardUploadAgents, ...(websiteDirectoryAgents || []).map(agent => ({ id: agent.id, name: agentDisplayName(agent), email: agentEmail(agent) }))]) {
+    if (agent.id) agents.set(String(agent.id), { id: String(agent.id), name: clean(agent.name) || String(agent.id), email: agentEmail(agent), assignable: activeAgentIds.has(String(agent.id)) });
   }
   for (const account of dashboardAccounts()) {
-    if (account.role === 'agent' && account.agentId) agents.set(String(account.agentId), { id: String(account.agentId), name: account.name || account.email || String(account.agentId), assignable: true });
+    if (account.role === 'agent' && account.agentId) agents.set(String(account.agentId), { id: String(account.agentId), name: account.name || account.email || String(account.agentId), email: account.email, assignable: true });
   }
   for (const item of items) {
     const id = String(item.assigned_agent_id || '');
@@ -435,11 +442,12 @@ function buildTeamContent(items, agents) {
     const ready = assigned.filter(item => item._review_status === 'accepted').length;
     const waiting = assigned.length - ready;
     const uploaded = assigned.filter(item => item._api_uploaded).length;
-    return `<a class="agent-profile-card" href="/?view=all&agent=${encodeURIComponent(agent.id)}">
+    return `<div class="agent-profile-card">
       <span class="agent-avatar">${html(agent.name.slice(0, 1).toUpperCase() || '?')}</span>
       <span class="agent-profile-copy"><strong>${html(agent.name)}</strong><small>${waiting} waiting · ${ready} ready · ${uploaded} uploaded</small></span>
       <span class="agent-profile-total">${assigned.length}<small>total</small></span>
-    </a>`;
+      <span class="agent-profile-actions"><a href="/?view=all&agent=${encodeURIComponent(agent.id)}">Apartments</a><a href="/?view=owners&agent=${encodeURIComponent(agent.id)}">Owners</a></span>
+    </div>`;
   }).join('');
   return `<section class="team-panel"><div class="team-heading"><div><p class="eyebrow">Apartment ownership</p><h2>Team profiles</h2><p>Open a profile to see every apartment assigned to that person.</p></div></div><div class="agent-profile-grid">${cards || '<div class="empty">No agent profiles are available yet.</div>'}</div></section>`;
 }
@@ -471,6 +479,9 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
     combined = combined.filter(item => String(item.assigned_agent_id || '') === String(selectedAgentId));
   }
   const selectedAgent = agents.find(agent => agent.id === String(selectedAgentId));
+  const selectedOwner = view === 'owners' && selectedAgent && ['admin', 'manager'].includes(viewer?.role)
+    ? { role: 'agent', agentId: selectedAgent.id, email: selectedAgent.email, name: selectedAgent.name }
+    : null;
   const showManagementComments = view === 'accepted' || Boolean(selectedAgentId && ['admin', 'manager'].includes(viewer?.role));
   const canReassign = ['admin', 'manager'].includes(viewer?.role);
   const canSelectTransfer = canReassign && Boolean(selectedAgent);
@@ -541,11 +552,11 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
     ${canReassign && bulkTargets.length ? `<div class="bulk-transfer"><span id="transfer-selection-count">0 selected</span><label>Send selected to <select id="bulk-transfer-agent"><option value="">Choose agent…</option>${bulkTargets.map(agent => `<option value="${html(agent.id)}">${html(agent.name)}</option>`).join('')}</select></label><button id="bulk-transfer-button" type="button" data-from-agent="${html(selectedAgent.id)}" disabled>Transfer selected</button></div>` : ''}
     <a href="/?view=${view === 'accepted' ? 'accepted' : 'all'}">Show everyone</a>
   </div>` : '';
-  const content = view === 'owners' ? buildOwnersContent(viewer) : view === 'team' ? buildTeamContent(allVisible, assignableAgents) : combined.length
+  const content = view === 'owners' ? buildOwnersContent(viewer, selectedOwner || viewer) : view === 'team' ? buildTeamContent(allVisible, assignableAgents) : combined.length
     ? `${profileBanner}${acceptedSearch}<table class="results-table"><thead><tr>${canSelectTransfer ? '<th class="transfer-select-heading"><input id="select-all-apartments" type="checkbox" aria-label="Select all visible apartments"></th>' : ''}<th class="review-heading">Review</th><th>Source</th><th>ID</th><th>Received</th><th>District</th><th>Assigned agent</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th><th>Website</th>${showManagementComments ? '<th>Accepted by</th><th>Comment</th>' : ''}</tr></thead><tbody>${rows}</tbody></table>`
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
-    .replace('{{LISTING_COUNT}}', String(view === 'owners' ? ownersData(viewer).rows.length : view === 'team' ? assignableAgents.length : combined.length))
+    .replace('{{LISTING_COUNT}}', String(view === 'owners' ? ownersData(selectedOwner || viewer).rows.length : view === 'team' ? assignableAgents.length : combined.length))
     .replace('{{LOGGED_IN_AS}}', html(viewer?.name || viewer?.email || process.env.DASHBOARD_DISPLAY_USER || process.env.WEBSITE_API_EMAIL || 'Local viewer'))
     .replace('{{LOGGED_IN_ROLE}}', html(viewer?.role || 'admin'))
     .replace('{{CURRENT_VIEW}}', ['owners', 'accepted', 'team'].includes(view) ? view : 'all')
@@ -566,10 +577,11 @@ function dashboardAccounts() {
     return accounts.map(account => ({
       email: clean(account.email).toLowerCase(),
       password: String(account.password || ''),
-      role: ['admin', 'manager'].includes(String(account.role || '').toLowerCase()) ? String(account.role).toLowerCase() : 'agent',
+      role: ['admin', 'manager', 'agent'].includes(String(account.role || '').toLowerCase()) ? String(account.role).toLowerCase() : 'unauthorized',
       agentId: String(account.agentId || ''),
       name: clean(account.name || account.email)
-    })).filter(account => account.email && account.password && (['admin', 'manager'].includes(account.role) || account.agentId));
+    })).filter(account => account.email && account.password &&
+      (['admin', 'manager'].includes(account.role) || (account.role === 'agent' && account.agentId)));
   }
   if (process.env.DASHBOARD_USER && process.env.DASHBOARD_PASSWORD) {
     return [{ email: process.env.DASHBOARD_USER.toLowerCase(), password: process.env.DASHBOARD_PASSWORD, role: 'admin', agentId: '', name: process.env.DASHBOARD_DISPLAY_USER || process.env.DASHBOARD_USER }];
@@ -595,11 +607,18 @@ function dashboardIdentity(payload, profile, email, token) {
   const claims = decodeJwt(token);
   const user = profile?.data?.user || profile?.user || profile?.data || profile || payload?.user || payload?.data?.user || {};
   const claimEmail = claims.email || claims.unique_name || claims['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress'] || '';
-  const roleValue = user.role || user.crmRole || payload?.role || payload?.data?.role || claims.role || claims['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] || '';
+  const roleValue = user.role || user.crmRole || user.userRole || user.roleName || user.userType || user.accountType ||
+    payload?.role || payload?.data?.role || claims.role || claims['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] || '';
   const roles = Array.isArray(roleValue) ? roleValue : [roleValue];
+  const normalizedRoles = roles.map(value => clean(typeof value === 'object' ? (value?.name || value?.role || value?.type) : value).toLowerCase());
   const adminEmails = String(process.env.DASHBOARD_ADMIN_EMAILS || '').split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
-  const role = roles.some(value => /admin/i.test(String(value))) || adminEmails.includes(email.toLowerCase())
-    ? 'admin' : roles.some(value => /manager/i.test(String(value))) ? 'manager' : 'agent';
+  const role = normalizedRoles.some(value => /(^|[ _-])admin(istrator)?($|[ _-])/.test(value)) || adminEmails.includes(email.toLowerCase())
+    ? 'admin'
+    : normalizedRoles.some(value => /(^|[ _-])manager($|[ _-])/.test(value))
+      ? 'manager'
+      : normalizedRoles.some(value => /(^|[ _-])agent($|[ _-])/.test(value))
+        ? 'agent'
+        : 'unauthorized';
   const agentId = String(user.userId || user.user_id || claims.sub || claims.nameid || claims['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier'] || user.id || '');
   return {
     email: clean(user.email || claimEmail || email).toLowerCase(),
@@ -623,7 +642,7 @@ async function authenticateViaWebsiteApi(email, password, cacheKey) {
   const profile = profileResponse.ok ? await profileResponse.json().catch(() => ({})) : {};
   const account = dashboardIdentity(payload, profile, email, token);
   if (account.role === 'agent' && !account.agentId) return null;
-  dashboardApiSessions.set(cacheKey, { account, expiresAt: Date.now() + 10 * 60 * 1000 });
+  dashboardApiSessions.set(cacheKey, { account, expiresAt: Date.now() + 30 * 1000 });
   return account;
 }
 
@@ -638,7 +657,7 @@ async function authenticateBearerViaWebsiteApi(token) {
   const email = clean(claims.email || claims.unique_name || claims['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress'] || claims.sub);
   const account = dashboardIdentity({}, profile, email, token);
   if (!account.email || (account.role === 'agent' && !account.agentId)) return null;
-  dashboardApiSessions.set(cacheKey, { account, expiresAt: Date.now() + 10 * 60 * 1000 });
+  dashboardApiSessions.set(cacheKey, { account, expiresAt: Date.now() + 30 * 1000 });
   return account;
 }
 
@@ -884,6 +903,11 @@ function startWebServer() {
     }
     const viewer = await authenticateDashboard(request, response);
     if (!viewer) return;
+    if (!['admin', 'manager', 'agent'].includes(viewer.role)) {
+      response.writeHead(403, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      response.end(JSON.stringify({ error: 'Apartment dashboard access is available only to agents, managers, and administrators' }));
+      return;
+    }
     if (pathname === '/api/watcher/config' && request.method === 'GET') {
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       response.end(JSON.stringify(publicWatcherConfig(viewer)));
@@ -984,16 +1008,17 @@ function startWebServer() {
       return;
     }
     if (pathname === '/api/apartments' && request.method === 'DELETE') {
-      if (viewer.role !== 'admin') {
-        response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
-        response.end(JSON.stringify({ error: 'Admin access is required to remove apartments' }));
-        return;
-      }
       const district = clean(requestUrl.searchParams.get('district'));
       const allPending = requestUrl.searchParams.get('scope') === 'all-pending';
       if (!district && !allPending) {
         response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify({ error: 'District is required' }));
+        return;
+      }
+      const canRemoveGlobally = ['admin', 'manager'].includes(viewer.role);
+      if (!canRemoveGlobally && viewer.role !== 'agent') {
+        response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: 'Apartment removal is not available for this account' }));
         return;
       }
       const normalizedDistrict = district.toLocaleLowerCase('en-US');
@@ -1005,7 +1030,8 @@ function startWebServer() {
       let preserved = 0;
       for (const source of sources) {
         let changed = false;
-        for (const item of Object.values(source.data)) {
+        for (const [itemKey, item] of Object.entries(source.data)) {
+          if (!canRemoveGlobally && String(item.assigned_agent_id || '') !== String(viewer.agentId || '')) continue;
           if (!allPending && clean(item.district).toLocaleLowerCase('en-US') !== normalizedDistrict) continue;
           if (item._review_status === 'accepted') {
             preserved += 1;
@@ -1013,9 +1039,7 @@ function startWebServer() {
           }
           if (item._excluded) continue;
           if (allPending && (item._baseline || item._review_status === 'rejected')) continue;
-          item._excluded = true;
-          item._excluded_reason = allPending ? `Pending apartments cleared by ${viewer.email}` : `District removed by ${viewer.email}`;
-          item._excluded_at = new Date().toISOString();
+          delete source.data[itemKey];
           removed += 1;
           changed = true;
         }
@@ -2336,7 +2360,7 @@ async function main() {
   liveMyHomeData = data;
   liveSsData = ssData;
   const state = loadState();
-  const restoredAccepted = restoreAcceptedDistrictRemovals(data) + restoreAcceptedDistrictRemovals(ssData);
+  const restoredAccepted = restoreAccidentallyExcludedApartments(data) + restoreAccidentallyExcludedApartments(ssData);
   const excludedMyHome = markExcludedDescriptions(data);
   const excludedSs = markExcludedDescriptions(ssData);
   const clearedStreetErrors = clearLegacyStreetUploadErrors(data) + clearLegacyStreetUploadErrors(ssData);
