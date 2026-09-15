@@ -2350,7 +2350,7 @@ async function scan(context, data, state, options) {
           item._excluded_reason = 'description';
           data[item.apartment_id] = item;
           saveData(data);
-          console.log(`FILTERED MyHome ID ${item.apartment_id} because its description contains an excluded phrase.`);
+          console.log(`FILTERED MyHome ID ${item.apartment_id} because its description contains an excluded phrase: "${clean(item.description).slice(0, 120)}"`);
           continue;
         }
         item._baseline = false;
@@ -2447,7 +2447,7 @@ async function scanSs(context, data, state) {
           item._excluded_reason = 'description';
           data[item.apartment_id] = item;
           saveData(data, SS_DATA_PATH, SS_CSV_PATH);
-          console.log(`FILTERED SS.ge ID ${item.apartment_id} because its description contains an excluded phrase.`);
+          console.log(`FILTERED SS.ge ID ${item.apartment_id} because its description contains an excluded phrase: "${clean(item.description).slice(0, 120)}"`);
           continue;
         }
         item._baseline = false;
@@ -2519,6 +2519,15 @@ async function main() {
   }
   if (myHomeFilters.restored + ssFilters.restored) {
     console.log(`Restored ${myHomeFilters.restored + ssFilters.restored} listing(s) that no longer match the description or owner filters.`);
+  }
+  for (const [source, sourceData] of [['MyHome', data], ['SS.ge', ssData]]) {
+    const excludedNow = Object.values(sourceData).filter(item => item._excluded && !item._review_status);
+    if (!excludedNow.length) continue;
+    console.log(`Currently hidden ${source} listing(s) (${excludedNow.length}) and why:`);
+    for (const item of excludedNow) {
+      const snippet = clean(item.description).slice(0, 80);
+      console.log(`  ID ${item.apartment_id} [${item._excluded_reason || 'unknown'}]${item.owner_id ? ` ownerId=${item.owner_id}` : ''}${snippet ? ` desc="${snippet}${item.description.length > 80 ? '…' : ''}"` : ''}`);
+    }
   }
   console.log(`Saving results to ${CSV_PATH}`);
   console.log(`Saving SS.ge results to ${SS_CSV_PATH}`);
