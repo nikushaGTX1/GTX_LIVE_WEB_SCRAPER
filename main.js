@@ -6,8 +6,8 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { pathToFileURL } = require('node:url');
 const { chromium } = require('playwright');
-const { hasExcludedDescription } = require('./description-filter');
-const { belongsToSavedOwner, ownerIdsFromRows } = require('./owner-filter');
+const { excludedDescriptionMatch, hasExcludedDescription } = require('./description-filter');
+const { belongsToSavedOwner, nonCooperatingOwnerIds } = require('./owner-filter');
 
 const DISTRICT_SEARCHES = [];
 const SEARCH_PRESETS = [
@@ -33,6 +33,10 @@ const STATE_PATH = path.join(DATA_ROOT, 'watcher-state.json');
 const WATCHER_CONFIG_PATH = path.join(DATA_ROOT, 'watcher-config.json');
 const OWNERS_PATH = path.join(DATA_ROOT, 'owners.json');
 const ADMIN_OWNERS_PATH = path.join(DATA_ROOT, 'owners-admin.json');
+// The only persistent exclusion store: apartment IDs a person dismissed with
+// the × button. Nothing else may be written here, so an apartment that merely
+// left All Apartments can be discovered again on a later scan.
+const REJECTED_APARTMENTS_PATH = path.join(DATA_ROOT, 'rejected-apartments.json');
 const PROFILE_PATH = process.env.WATCHER_PROFILE || path.join(DATA_ROOT, '.browser-profile');
 const IS_HOSTED = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID);
 const SS_SCRAPER_ENABLED = String(process.env.ENABLE_SS_SCRAPER || '').toLowerCase() === 'true';
@@ -124,29 +128,33 @@ function clearLegacyStreetData(data) {
   return changed;
 }
 
-function markExcludedDescriptions(data) {
-  let count = 0;
-  for (const item of Object.values(data)) {
-    if (hasExcludedDescription(item.description)) {
-      item._baseline = true;
-      item._excluded = true;
-      count += 1;
-    }
-  }
-  return count;
-}
-
-function restoreAcceptedDistrictRemovals(data) {
+// Description phrases and owner agreements both change over time, so the two
+// automatic filters are re-applied on every start. A listing stays hidden only
+// while it still matches a filter; reviewed apartments are never touched here,
+// which keeps Ready For Upload and × dismissals exactly as they are.
+function refreshFilterExclusions(data, blockedOwners) {
+  let excluded = 0;
   let restored = 0;
   for (const item of Object.values(data)) {
-    if (item._review_status !== 'accepted' || !item._excluded || !/^District removed by /i.test(item._excluded_reason || '')) continue;
-    delete item._excluded;
-    delete item._excluded_reason;
-    delete item._excluded_at;
-    item._baseline = false;
-    restored += 1;
+    if (item._review_status) continue;
+    const reason = hasExcludedDescription(item.description)
+      ? 'description'
+      : belongsToSavedOwner(item, blockedOwners) ? 'owner_id' : '';
+    const filteredBefore = ['description', 'owner_id'].includes(item._excluded_reason) ||
+      (item._excluded === true && !item._excluded_reason);
+    if (reason) {
+      if (!item._excluded) excluded += 1;
+      item._baseline = true;
+      item._excluded = true;
+      item._excluded_reason = reason;
+    } else if (filteredBefore) {
+      delete item._excluded;
+      delete item._excluded_reason;
+      item._baseline = false;
+      restored += 1;
+    }
   }
-  return restored;
+  return { excluded, restored };
 }
 
 function match(pattern, text, group = 1) {
@@ -271,8 +279,13 @@ function ownerAccountKey(viewer) {
 }
 
 function ownersPathFor(viewer) {
-  if (viewer?.role === 'admin') return ADMIN_OWNERS_PATH;
+  if (['admin', 'manager'].includes(viewer?.role)) return ADMIN_OWNERS_PATH;
   return path.join(DATA_ROOT, `owners-${ownerAccountKey(viewer)}.json`);
+}
+
+function agentEmail(agent) {
+  const person = agent?.user || agent?.profile || agent;
+  return clean(person?.email || agent?.email).toLowerCase();
 }
 
 function myHomePhoneInfo(source = {}) {
@@ -359,48 +372,131 @@ function applyAcceptedCommentsToOwners(data) {
 
 function ownersData(viewer) {
   const accountPath = ownersPathFor(viewer);
-  let data;
-  if (viewer?.role === 'admin' && !fs.existsSync(accountPath)) {
-    let rows = [];
-    const legacyPaths = fs.readdirSync(DATA_ROOT)
+  let data = normalizedOwnersData(readJsonFile(accountPath));
+  if (['admin', 'manager'].includes(viewer?.role)) {
+    const agentPaths = fs.readdirSync(DATA_ROOT)
       .filter(name => /^owners-[a-f0-9]{24}\.json$/i.test(name))
       .map(name => path.join(DATA_ROOT, name));
-    if (fs.existsSync(OWNERS_PATH)) legacyPaths.unshift(OWNERS_PATH);
-    for (const legacyPath of legacyPaths) rows = mergeOwnerRows(rows, normalizedOwnersData(readJsonFile(legacyPath)).rows);
-    data = { headers: OWNER_HEADERS, rows };
-  } else {
-    data = normalizedOwnersData(readJsonFile(accountPath));
+    if (fs.existsSync(OWNERS_PATH)) agentPaths.unshift(OWNERS_PATH);
+    for (const agentPath of agentPaths) data.rows = mergeOwnerRows(data.rows, normalizedOwnersData(readJsonFile(agentPath)).rows);
   }
-  if (applyAcceptedCommentsToOwners(data) || !fs.existsSync(accountPath)) {
+  const beforeComments = JSON.stringify(data);
+  applyAcceptedCommentsToOwners(data);
+  if (beforeComments !== JSON.stringify(data) || !fs.existsSync(accountPath) || ['admin', 'manager'].includes(viewer?.role)) {
     fs.writeFileSync(accountPath, JSON.stringify(data, null, 2), 'utf8');
   }
   return data;
 }
 
-function savedOwnerIds() {
-  return ownerIdsFromRows(ownersData({ role: 'admin', email: 'owners-inbox' }).rows);
+function removeOwnersFromEveryDatabase(ownerId = '') {
+  const paths = [ADMIN_OWNERS_PATH, OWNERS_PATH, ...fs.readdirSync(DATA_ROOT)
+    .filter(name => /^owners-[a-f0-9]{24}\.json$/i.test(name))
+    .map(name => path.join(DATA_ROOT, name))];
+  for (const ownerPath of new Set(paths)) {
+    if (!fs.existsSync(ownerPath)) continue;
+    const data = normalizedOwnersData(readJsonFile(ownerPath));
+    data.rows = ownerId ? data.rows.filter(row => clean(row[0]) !== ownerId) : [];
+    fs.writeFileSync(ownerPath, JSON.stringify(data, null, 2), 'utf8');
+  }
 }
 
-function buildOwnersContent(viewer) {
-  const data = ownersData(viewer);
-  const districts = [...new Set(data.rows.map(row => clean(row[2])).filter(Boolean))]
+// Owners saved with an agreement note that refuses cooperation. Owners we do
+// work with stay out of this set so their listings keep being imported.
+function blockedOwnerIds() {
+  return nonCooperatingOwnerIds(ownersData({ role: 'admin', email: 'owners-inbox' }).rows);
+}
+
+function apartmentRegistryKey(source, apartmentId) {
+  return `${source === 'SS.ge' ? 'SS.ge' : 'MyHome'}:${clean(apartmentId)}`;
+}
+
+function rejectedApartmentRegistry() {
+  return readJsonFile(REJECTED_APARTMENTS_PATH);
+}
+
+function rememberRejectedApartment(item, source, viewer) {
+  const registry = rejectedApartmentRegistry();
+  const key = apartmentRegistryKey(source, item.apartment_id);
+  registry[key] = {
+    apartmentId: clean(item.apartment_id), source: source === 'SS.ge' ? 'SS.ge' : 'MyHome',
+    rejectedAt: item._reviewed_at || new Date().toISOString(), rejectedBy: viewer?.email || ''
+  };
+  fs.writeFileSync(REJECTED_APARTMENTS_PATH, JSON.stringify(registry, null, 2), 'utf8');
+}
+
+// Listings the scraper must never surface again: the IDs dismissed with the ×
+// button (kept in rejected-apartments.json even after the record is deleted)
+// plus the IDs still held in a live queue as reviewed. Clearing a pending list
+// or a district deliberately adds nothing here.
+function permanentApartmentKeys(myHomeData = {}, ssData = {}) {
+  const keys = new Set(Object.keys(rejectedApartmentRegistry()));
+  for (const [source, data] of [['MyHome', myHomeData], ['SS.ge', ssData]]) {
+    for (const item of Object.values(data)) {
+      if (item._review_status === 'accepted' || item._review_status === 'rejected') {
+        keys.add(apartmentRegistryKey(source, item.apartment_id));
+      }
+    }
+  }
+  return keys;
+}
+
+function runOneTimeScrapeHistoryReset(data, ssData, state) {
+  const resetVersion = 1;
+  if (Number(state.scrape_history_reset_version || 0) >= resetVersion) return 0;
+  let removed = 0;
+  for (const sourceData of [data, ssData]) {
+    for (const [key, item] of Object.entries(sourceData)) {
+      if (item._review_status === 'accepted') continue;
+      delete sourceData[key];
+      removed += 1;
+    }
+  }
+  state.scrape_history_reset_version = resetVersion;
+  state.scrape_history_reset_at = new Date().toISOString();
+  saveState(state);
+  return removed;
+}
+
+function ownersDataForSubject(viewer, subject) {
+  if (!subject || ownersPathFor(subject) === ownersPathFor(viewer)) return ownersData(viewer);
+  const agentId = String(subject.agentId || '');
+  const assignedListingIds = new Set(
+    [...Object.values(readJsonFile(DATA_PATH)), ...Object.values(readJsonFile(SS_DATA_PATH))]
+      .filter(item => String(item.assigned_agent_id || '') === agentId ||
+        (item._listing_uploads || []).some(upload => String(upload.agentUserId || '') === agentId))
+      .map(item => clean(item.apartment_id))
+      .filter(Boolean)
+  );
+  const central = ownersData(viewer);
+  let rows = central.rows.filter(row => assignedListingIds.has(clean(row[0])));
+  const privatePath = ownersPathFor(subject);
+  if (fs.existsSync(privatePath)) {
+    rows = mergeOwnerRows(rows, normalizedOwnersData(readJsonFile(privatePath)).rows);
+  }
+  return { headers: OWNER_HEADERS, rows };
+}
+
+function buildOwnersContent(viewer, subject = viewer) {
+  const readOnly = ownersPathFor(subject) !== ownersPathFor(viewer);
+  const displayed = ownersDataForSubject(viewer, subject);
+  const districts = [...new Set(displayed.rows.map(row => clean(row[2])).filter(Boolean))]
     .sort((left, right) => left.localeCompare(right, 'ka', { sensitivity: 'base' }));
-  const head = `${data.headers.map((header, columnIndex) => {
+  const head = `${displayed.headers.map((header, columnIndex) => {
     if (columnIndex === 2) return `<th class="owner-filter-heading"><button class="owner-filter-button" type="button" data-owner-filter="district" aria-expanded="false">${html(header)} <span aria-hidden="true">▾</span></button><div class="owner-district-menu" hidden><button type="button" data-owner-district="">ყველა უბანი</button>${districts.map(district => `<button type="button" data-owner-district="${html(district)}">${html(district)}</button>`).join('')}</div></th>`;
     if (columnIndex === 4 || columnIndex === 5) return `<th><button class="owner-filter-button" type="button" data-owner-sort="${columnIndex}" aria-pressed="false">${html(header)} <span aria-hidden="true">↓</span></button></th>`;
     return `<th>${html(header)}</th>`;
-  }).join('')}<th class="owner-actions-column">Actions</th>`;
-  const rows = data.rows.map((row, rowIndex) => `<tr data-owner-row="${rowIndex}">${data.headers.map((_, columnIndex) => `<td class="owner-cell" contenteditable="true" spellcheck="false" data-owner-index="${rowIndex}" data-owner-column="${columnIndex}">${html(row[columnIndex] ?? '')}</td>`).join('')}<td class="owner-row-actions"><button class="owner-remove" type="button" data-owner-index="${rowIndex}" aria-label="Remove owner row">Remove</button></td></tr>`).join('\n');
+  }).join('')}${readOnly ? '' : '<th class="owner-actions-column">Actions</th>'}`;
+  const rows = displayed.rows.map((row, rowIndex) => `<tr data-owner-row="${rowIndex}">${displayed.headers.map((_, columnIndex) => `<td class="owner-cell"${readOnly ? '' : ' contenteditable="true"'} spellcheck="false" data-owner-index="${rowIndex}" data-owner-column="${columnIndex}">${html(row[columnIndex] ?? '')}</td>`).join('')}${readOnly ? '' : `<td class="owner-row-actions"><button class="owner-remove" type="button" data-owner-index="${rowIndex}" aria-label="Remove owner row">Remove</button></td>`}</tr>`).join('\n');
   return `<section class="owners-panel" aria-labelledby="owners-title">
     <div class="owners-toolbar">
-      <div><p class="eyebrow">Owner database</p><h2 id="owners-title">Owners</h2><p id="owners-import-status">${data.rows.length} saved row(s)</p></div>
-      <div class="owners-actions">
+      <div><p class="eyebrow">Owner database</p><h2 id="owners-title">${readOnly ? `${html(subject.name)}'s Owners` : 'Owners'}</h2><p id="owners-import-status">${displayed.rows.length} saved row(s)</p></div>
+      ${readOnly ? '<a href="/?view=team">Back to Team profiles</a>' : `<div class="owners-actions">
         <input id="owners-file" type="file" accept=".xlsx,.xls,.csv" hidden>
         <button id="owners-add-row" type="button">Add row</button>
         <button id="owners-import" class="save-button" type="button">Import Excel</button>
         <button id="owners-append" type="button">Append Excel</button>
         <button id="owners-remove-all" type="button">Remove all</button>
-      </div>
+      </div>`}
     </div>
     <div class="table-search" role="search">
       <label for="table-search-input">Search owners</label>
@@ -417,11 +513,11 @@ function managementAgents(items = []) {
   for (const account of dashboardAccounts()) {
     if (account.role === 'agent' && account.agentId) activeAgentIds.add(String(account.agentId));
   }
-  for (const agent of [...dashboardUploadAgents, ...(websiteDirectoryAgents || []).map(agent => ({ id: agent.id, name: agentDisplayName(agent) }))]) {
-    if (agent.id) agents.set(String(agent.id), { id: String(agent.id), name: clean(agent.name) || String(agent.id), assignable: activeAgentIds.has(String(agent.id)) });
+  for (const agent of [...dashboardUploadAgents, ...(websiteDirectoryAgents || []).map(agent => ({ id: agent.id, name: agentDisplayName(agent), email: agentEmail(agent) }))]) {
+    if (agent.id) agents.set(String(agent.id), { id: String(agent.id), name: clean(agent.name) || String(agent.id), email: agentEmail(agent), assignable: activeAgentIds.has(String(agent.id)) });
   }
   for (const account of dashboardAccounts()) {
-    if (account.role === 'agent' && account.agentId) agents.set(String(account.agentId), { id: String(account.agentId), name: account.name || account.email || String(account.agentId), assignable: true });
+    if (account.role === 'agent' && account.agentId) agents.set(String(account.agentId), { id: String(account.agentId), name: account.name || account.email || String(account.agentId), email: account.email, assignable: true });
   }
   for (const item of items) {
     const id = String(item.assigned_agent_id || '');
@@ -436,17 +532,18 @@ function buildTeamContent(items, agents) {
     const ready = assigned.filter(item => item._review_status === 'accepted').length;
     const waiting = assigned.length - ready;
     const uploaded = assigned.filter(item => item._api_uploaded).length;
-    return `<a class="agent-profile-card" href="/?view=all&agent=${encodeURIComponent(agent.id)}">
+    return `<div class="agent-profile-card">
       <span class="agent-avatar">${html(agent.name.slice(0, 1).toUpperCase() || '?')}</span>
       <span class="agent-profile-copy"><strong>${html(agent.name)}</strong><small>${waiting} waiting · ${ready} ready · ${uploaded} uploaded</small></span>
       <span class="agent-profile-total">${assigned.length}<small>total</small></span>
-    </a>`;
+      <span class="agent-profile-actions"><a href="/?view=all&agent=${encodeURIComponent(agent.id)}">Apartments</a><a href="/?view=owners&agent=${encodeURIComponent(agent.id)}">Owners</a></span>
+    </div>`;
   }).join('');
   return `<section class="team-panel"><div class="team-heading"><div><p class="eyebrow">Apartment ownership</p><h2>Team profiles</h2><p>Open a profile to see every apartment assigned to that person.</p></div></div><div class="agent-profile-grid">${cards || '<div class="empty">No agent profiles are available yet.</div>'}</div></section>`;
 }
 
 function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
-  const ownerIds = savedOwnerIds();
+  const ownerIds = blockedOwnerIds();
   const allVisible = [
     ...Object.values(readJsonFile(DATA_PATH)).map(item => ({ ...item, source: item.source || 'MyHome' })),
     ...Object.values(readJsonFile(SS_DATA_PATH)).map(item => ({ ...item, source: 'SS.ge' }))
@@ -472,16 +569,15 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
     combined = combined.filter(item => String(item.assigned_agent_id || '') === String(selectedAgentId));
   }
   const selectedAgent = agents.find(agent => agent.id === String(selectedAgentId));
+  const selectedOwner = view === 'owners' && selectedAgent && ['admin', 'manager'].includes(viewer?.role)
+    ? { role: 'agent', agentId: selectedAgent.id, email: selectedAgent.email, name: selectedAgent.name }
+    : null;
   const showManagementComments = view === 'accepted' || Boolean(selectedAgentId && ['admin', 'manager'].includes(viewer?.role));
   const canReassign = ['admin', 'manager'].includes(viewer?.role);
   const canSelectTransfer = canReassign && Boolean(selectedAgent);
   const assignmentOptions = item => {
     const currentId = String(item.assigned_agent_id || '');
-    const current = agents.find(agent => agent.id === currentId);
-    const inactiveCurrent = currentId && !assignableAgents.some(agent => agent.id === currentId)
-      ? `<option value="${html(currentId)}" selected disabled>${html(current?.name || item.assigned_agent_name || currentId)} (inactive)</option>`
-      : '';
-    return inactiveCurrent + assignableAgents.map(agent => `<option value="${html(agent.id)}"${currentId === agent.id ? ' selected' : ''}>${html(agent.name)}</option>`).join('');
+    return assignableAgents.map(agent => `<option value="${html(agent.id)}"${currentId === agent.id ? ' selected' : ''}>${html(agent.name)}</option>`).join('');
   };
 
   const rows = combined.map(item => {
@@ -490,8 +586,9 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
       : item._api_error
         ? `<span class="website-upload error" title="${html(item._api_error)}">Retrying</span>`
         : '<span class="website-upload pending">Pending</span>';
+    const waitingForReview = item._review_status !== 'accepted';
     const apartmentRow = `<tr data-apartment-id="${html(item.apartment_id)}" data-apartment-source="${html(item.source)}" data-district="${html(item.district || 'Other')}" class="apartment-row ${item._review_status === 'accepted' ? 'review-accepted' : ''}">
-      ${canSelectTransfer ? `<td class="transfer-select-cell"><input class="transfer-apartment-checkbox" type="checkbox" aria-label="Select apartment ${html(item.apartment_id)} for transfer"></td>` : ''}
+      ${canSelectTransfer ? `<td class="transfer-select-cell">${waitingForReview ? `<input class="transfer-apartment-checkbox" type="checkbox" aria-label="Select waiting apartment ${html(item.apartment_id)} for transfer">` : ''}</td>` : ''}
       <td class="review-cell">
         <div class="review-buttons">
           ${view === 'accepted' ? '' : `<button class="review-button accept-button${item._review_status === 'accepted' ? ' selected' : ''}" type="button" title="${item._review_status === 'accepted' ? 'Accepted' : 'Accept apartment'}" aria-label="Accept apartment" aria-pressed="${item._review_status === 'accepted' ? 'true' : 'false'}">✓</button>`}
@@ -542,11 +639,11 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
     ${canReassign && bulkTargets.length ? `<div class="bulk-transfer"><span id="transfer-selection-count">0 selected</span><label>Send selected to <select id="bulk-transfer-agent"><option value="">Choose agent…</option>${bulkTargets.map(agent => `<option value="${html(agent.id)}">${html(agent.name)}</option>`).join('')}</select></label><button id="bulk-transfer-button" type="button" data-from-agent="${html(selectedAgent.id)}" disabled>Transfer selected</button></div>` : ''}
     <a href="/?view=${view === 'accepted' ? 'accepted' : 'all'}">Show everyone</a>
   </div>` : '';
-  const content = view === 'owners' ? buildOwnersContent(viewer) : view === 'team' ? buildTeamContent(allVisible, assignableAgents) : combined.length
+  const content = view === 'owners' ? buildOwnersContent(viewer, selectedOwner || viewer) : view === 'team' ? buildTeamContent(allVisible, assignableAgents) : combined.length
     ? `${profileBanner}${acceptedSearch}<table class="results-table"><thead><tr>${canSelectTransfer ? '<th class="transfer-select-heading"><input id="select-all-apartments" type="checkbox" aria-label="Select all visible apartments"></th>' : ''}<th class="review-heading">Review</th><th>Source</th><th>ID</th><th>Received</th><th>District</th><th>Assigned agent</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th><th>Website</th>${showManagementComments ? '<th>Accepted by</th><th>Comment</th>' : ''}</tr></thead><tbody>${rows}</tbody></table>`
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
-    .replace('{{LISTING_COUNT}}', String(view === 'owners' ? ownersData(viewer).rows.length : view === 'team' ? assignableAgents.length : combined.length))
+    .replace('{{LISTING_COUNT}}', String(view === 'owners' ? ownersDataForSubject(viewer, selectedOwner || viewer).rows.length : view === 'team' ? assignableAgents.length : combined.length))
     .replace('{{LOGGED_IN_AS}}', html(viewer?.name || viewer?.email || process.env.DASHBOARD_DISPLAY_USER || process.env.WEBSITE_API_EMAIL || 'Local viewer'))
     .replace('{{LOGGED_IN_ROLE}}', html(viewer?.role || 'admin'))
     .replace('{{CURRENT_VIEW}}', ['owners', 'accepted', 'team'].includes(view) ? view : 'all')
@@ -567,10 +664,11 @@ function dashboardAccounts() {
     return accounts.map(account => ({
       email: clean(account.email).toLowerCase(),
       password: String(account.password || ''),
-      role: ['admin', 'manager'].includes(String(account.role || '').toLowerCase()) ? String(account.role).toLowerCase() : 'agent',
+      role: ['admin', 'manager', 'agent'].includes(String(account.role || '').toLowerCase()) ? String(account.role).toLowerCase() : 'unauthorized',
       agentId: String(account.agentId || ''),
       name: clean(account.name || account.email)
-    })).filter(account => account.email && account.password && (['admin', 'manager'].includes(account.role) || account.agentId));
+    })).filter(account => account.email && account.password &&
+      (['admin', 'manager'].includes(account.role) || (account.role === 'agent' && account.agentId)));
   }
   if (process.env.DASHBOARD_USER && process.env.DASHBOARD_PASSWORD) {
     return [{ email: process.env.DASHBOARD_USER.toLowerCase(), password: process.env.DASHBOARD_PASSWORD, role: 'admin', agentId: '', name: process.env.DASHBOARD_DISPLAY_USER || process.env.DASHBOARD_USER }];
@@ -596,11 +694,18 @@ function dashboardIdentity(payload, profile, email, token) {
   const claims = decodeJwt(token);
   const user = profile?.data?.user || profile?.user || profile?.data || profile || payload?.user || payload?.data?.user || {};
   const claimEmail = claims.email || claims.unique_name || claims['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress'] || '';
-  const roleValue = user.role || user.crmRole || payload?.role || payload?.data?.role || claims.role || claims['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] || '';
+  const roleValue = user.role || user.crmRole || user.userRole || user.roleName || user.userType || user.accountType ||
+    payload?.role || payload?.data?.role || claims.role || claims['http://schemas.microsoft.com/ws/2008/06/identity/claims/role'] || '';
   const roles = Array.isArray(roleValue) ? roleValue : [roleValue];
+  const normalizedRoles = roles.map(value => clean(typeof value === 'object' ? (value?.name || value?.role || value?.type) : value).toLowerCase());
   const adminEmails = String(process.env.DASHBOARD_ADMIN_EMAILS || '').split(',').map(value => value.trim().toLowerCase()).filter(Boolean);
-  const role = roles.some(value => /admin/i.test(String(value))) || adminEmails.includes(email.toLowerCase())
-    ? 'admin' : roles.some(value => /manager/i.test(String(value))) ? 'manager' : 'agent';
+  const role = normalizedRoles.some(value => /(^|[ _-])admin(istrator)?($|[ _-])/.test(value)) || adminEmails.includes(email.toLowerCase())
+    ? 'admin'
+    : normalizedRoles.some(value => /(^|[ _-])manager($|[ _-])/.test(value))
+      ? 'manager'
+      : normalizedRoles.some(value => /(^|[ _-])agent($|[ _-])/.test(value))
+        ? 'agent'
+        : 'unauthorized';
   const agentId = String(user.userId || user.user_id || claims.sub || claims.nameid || claims['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/nameidentifier'] || user.id || '');
   return {
     email: clean(user.email || claimEmail || email).toLowerCase(),
@@ -624,7 +729,7 @@ async function authenticateViaWebsiteApi(email, password, cacheKey) {
   const profile = profileResponse.ok ? await profileResponse.json().catch(() => ({})) : {};
   const account = dashboardIdentity(payload, profile, email, token);
   if (account.role === 'agent' && !account.agentId) return null;
-  dashboardApiSessions.set(cacheKey, { account, expiresAt: Date.now() + 10 * 60 * 1000 });
+  dashboardApiSessions.set(cacheKey, { account, expiresAt: Date.now() + 30 * 1000 });
   return account;
 }
 
@@ -639,7 +744,7 @@ async function authenticateBearerViaWebsiteApi(token) {
   const email = clean(claims.email || claims.unique_name || claims['http://schemas.xmlsoap.org/ws/2005/05/identity/claims/emailaddress'] || claims.sub);
   const account = dashboardIdentity({}, profile, email, token);
   if (!account.email || (account.role === 'agent' && !account.agentId)) return null;
-  dashboardApiSessions.set(cacheKey, { account, expiresAt: Date.now() + 10 * 60 * 1000 });
+  dashboardApiSessions.set(cacheKey, { account, expiresAt: Date.now() + 30 * 1000 });
   return account;
 }
 
@@ -837,6 +942,7 @@ async function reviewApartment(request, response, viewer, apartmentId) {
     item._reviewed_by = viewer.name || viewer.email;
     item._reviewed_by_email = viewer.email;
     item._reviewed_at = new Date().toISOString();
+    if (body.action === 'rejected') rememberRejectedApartment(item, data === ssData ? 'SS.ge' : 'MyHome', viewer);
     if (data === myHomeData) saveData(data);
     else saveData(data, SS_DATA_PATH, SS_CSV_PATH);
     response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
@@ -885,6 +991,11 @@ function startWebServer() {
     }
     const viewer = await authenticateDashboard(request, response);
     if (!viewer) return;
+    if (!['admin', 'manager', 'agent'].includes(viewer.role)) {
+      response.writeHead(403, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
+      response.end(JSON.stringify({ error: 'Apartment dashboard access is available only to agents, managers, and administrators' }));
+      return;
+    }
     if (pathname === '/api/watcher/config' && request.method === 'GET') {
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       response.end(JSON.stringify(publicWatcherConfig(viewer)));
@@ -929,7 +1040,7 @@ function startWebServer() {
         const transfer = (data, source) => {
           let changed = false;
           for (const item of Object.values(data)) {
-            if (item._baseline || item._excluded || item._review_status === 'rejected') continue;
+            if (item._baseline || item._excluded || ['accepted', 'rejected'].includes(item._review_status)) continue;
             if (String(item.assigned_agent_id || '') !== fromAgentId) continue;
             if (!selectedKeys.has(`${source}:${item.apartment_id}`)) continue;
             item.assigned_agent_id = target.id;
@@ -985,11 +1096,6 @@ function startWebServer() {
       return;
     }
     if (pathname === '/api/apartments' && request.method === 'DELETE') {
-      if (viewer.role !== 'admin') {
-        response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
-        response.end(JSON.stringify({ error: 'Admin access is required to remove apartments' }));
-        return;
-      }
       const district = clean(requestUrl.searchParams.get('district'));
       const allPending = requestUrl.searchParams.get('scope') === 'all-pending';
       if (!district && !allPending) {
@@ -997,33 +1103,50 @@ function startWebServer() {
         response.end(JSON.stringify({ error: 'District is required' }));
         return;
       }
+      const canRemoveGlobally = ['admin', 'manager'].includes(viewer.role);
+      if (!canRemoveGlobally && viewer.role !== 'agent') {
+        response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: 'Apartment removal is not available for this account' }));
+        return;
+      }
+      // Management clears one agent's queue while a profile is open and the
+      // whole board otherwise; an agent is always limited to their own queue.
+      const agentScope = canRemoveGlobally
+        ? clean(requestUrl.searchParams.get('agent'))
+        : String(viewer.agentId || '');
+      if (!canRemoveGlobally && !agentScope) {
+        response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: 'This account has no agent profile to clear' }));
+        return;
+      }
       const normalizedDistrict = district.toLocaleLowerCase('en-US');
       const sources = [
-        { data: liveMyHomeData || loadData(), save: data => saveData(data) },
-        { data: liveSsData || loadSsData(), save: data => saveData(data, SS_DATA_PATH, SS_CSV_PATH) }
+        { name: 'MyHome', data: liveMyHomeData || loadData(), save: data => saveData(data) },
+        { name: 'SS.ge', data: liveSsData || loadSsData(), save: data => saveData(data, SS_DATA_PATH, SS_CSV_PATH) }
       ];
       let removed = 0;
       let preserved = 0;
       for (const source of sources) {
         let changed = false;
-        for (const item of Object.values(source.data)) {
+        for (const [itemKey, item] of Object.entries(source.data)) {
+          if (agentScope && String(item.assigned_agent_id || '') !== agentScope) continue;
           if (!allPending && clean(item.district).toLocaleLowerCase('en-US') !== normalizedDistrict) continue;
-          if (item._review_status === 'accepted') {
+          // Ready For Upload and anything already published stay untouched.
+          if (item._review_status === 'accepted' || item._api_uploaded) {
             preserved += 1;
             continue;
           }
-          if (item._excluded) continue;
-          if (allPending && (item._baseline || item._review_status === 'rejected')) continue;
-          item._excluded = true;
-          item._excluded_reason = allPending ? `Pending apartments cleared by ${viewer.email}` : `District removed by ${viewer.email}`;
-          item._excluded_at = new Date().toISOString();
+          if (!allPending && item._excluded) continue;
+          // Clearing a list is not a dismissal: nothing is written to the
+          // rejected registry, so the scraper may find these listings again.
+          delete source.data[itemKey];
           removed += 1;
           changed = true;
         }
         if (changed) source.save(source.data);
       }
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-      response.end(JSON.stringify({ ok: true, district, removed, preserved }));
+      response.end(JSON.stringify({ ok: true, district, removed, preserved, agentId: agentScope }));
       return;
     }
     if (pathname === '/api/apartments/import-word' && request.method === 'POST') {
@@ -1188,11 +1311,17 @@ function startWebServer() {
     if (pathname === '/api/owners' && request.method === 'DELETE') {
       try {
         const data = ownersData(viewer);
-        if (requestUrl.searchParams.get('all') === 'true') data.rows = [];
+        const management = ['admin', 'manager'].includes(viewer.role);
+        if (requestUrl.searchParams.get('all') === 'true') {
+          data.rows = [];
+          if (management) removeOwnersFromEveryDatabase();
+        }
         else {
           const index = Number(requestUrl.searchParams.get('index'));
           if (!Number.isInteger(index) || index < 0 || index >= data.rows.length) throw new Error('Owner row was not found');
+          const ownerId = clean(data.rows[index][0]);
           data.rows.splice(index, 1);
+          if (management && ownerId) removeOwnersFromEveryDatabase(ownerId);
         }
         fs.writeFileSync(ownersPathFor(viewer), JSON.stringify(data, null, 2), 'utf8');
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
@@ -1270,7 +1399,7 @@ function saveData(data, dataPath = DATA_PATH, csvPath = CSV_PATH) {
   fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf8');
   fs.renameSync(tempPath, dataPath);
 
-  const ownerIds = savedOwnerIds();
+  const ownerIds = blockedOwnerIds();
   const rows = Object.values(data)
     .filter(row => !row._baseline && !row._excluded && row._review_status !== 'rejected' && !hasExcludedDescription(row.description) && !belongsToSavedOwner(row, ownerIds))
     .sort((a, b) => String(b.first_seen).localeCompare(String(a.first_seen)));
@@ -1783,6 +1912,14 @@ function agentDisplayName(agent) {
     [person?.firstName, person?.lastName].filter(Boolean).join(' ') || person?.email || agent?.id);
 }
 
+function isAssignableApiAgent(agent) {
+  const person = agent?.user || agent?.profile || agent;
+  const rawRole = person?.role || person?.crmRole || person?.userRole || person?.roleName || person?.userType || person?.accountType || agent?.role;
+  const role = clean(typeof rawRole === 'object' ? (rawRole?.name || rawRole?.role || rawRole?.type) : rawRole).toLowerCase();
+  if (role) return /(^|[ _-])agent($|[ _-])/.test(role);
+  return !/(^|\s)(admin(?:istrator)?|manager)(\s|$)/i.test(agentDisplayName(agent));
+}
+
 async function websiteApiRequest(pathname, options = {}, retry = true) {
   const headers = new Headers(options.headers || {});
   if (websiteApiToken) headers.set('authorization', `Bearer ${websiteApiToken}`);
@@ -1818,32 +1955,26 @@ async function loginWebsiteApi() {
 }
 
 async function getDistributionAgents() {
-  if (websiteApiAgents.length) return websiteApiAgents;
   if (!websiteApiToken && !await loginWebsiteApi()) return [];
   const payload = await websiteApiRequest('/api/Agents');
   const available = responseItems(payload)
     .map(agent => ({ ...agent, id: String(agent.userId ?? agent.user_id ?? agent.user?.id ?? agent.id ?? '') }))
-    .filter(agent => agent.id)
+    .filter(agent => agent.id && isAssignableApiAgent(agent))
     .sort((a, b) => a.id.localeCompare(b.id));
   websiteDirectoryAgents = available;
   const configuredIds = String(process.env.WEBSITE_API_AGENT_IDS || '')
     .split(',').map(value => value.trim()).filter(Boolean);
-  const distributionCount = Number(process.env.AGENT_DISTRIBUTION_COUNT || 8);
-  if (!Number.isInteger(distributionCount) || distributionCount < 1) {
-    throw new Error('AGENT_DISTRIBUTION_COUNT must be a positive whole number');
-  }
+  const configuredAgents = configuredIds.map(id => available.find(agent => agent.id === id)).filter(Boolean);
+  const configuredAgentIds = new Set(configuredAgents.map(agent => agent.id));
   websiteApiAgents = configuredIds.length
-    ? configuredIds.map(id => available.find(agent => agent.id === id)).filter(Boolean)
-    : available.slice(0, distributionCount);
-  if (configuredIds.length && websiteApiAgents.length !== configuredIds.length) {
-    const found = new Set(websiteApiAgents.map(agent => agent.id));
+    ? [...configuredAgents, ...available.filter(agent => !configuredAgentIds.has(agent.id))]
+    : available;
+  if (configuredIds.length && configuredAgents.length !== configuredIds.length) {
+    const found = new Set(configuredAgents.map(agent => agent.id));
     const missing = configuredIds.filter(id => !found.has(id));
-    throw new Error(`Configured Website API agent IDs were not found: ${missing.join(', ')}`);
+    console.warn(`Skipping inactive or non-agent configured Website API IDs: ${missing.join(', ')}`);
   }
   if (!websiteApiAgents.length) throw new Error('Round-robin could not resolve any agents');
-  if (!configuredIds.length && websiteApiAgents.length < distributionCount) {
-    console.warn(`Round-robin requested ${distributionCount} agents but resolved ${websiteApiAgents.length}; using all available agents.`);
-  }
   return websiteApiAgents;
 }
 
@@ -1873,17 +2004,34 @@ function districtFromListingUrl(value) {
 
 async function assignPendingApartments(data, state, dataPath = DATA_PATH, csvPath = CSV_PATH) {
   if (!process.env.WEBSITE_API_EMAIL || !process.env.WEBSITE_API_PASSWORD) return 0;
+  const agents = await getDistributionAgents();
+  const activeAgentIds = new Set(agents.map(agent => String(agent.id)));
+  let released = 0;
+  for (const item of Object.values(data)) {
+    const assignedId = String(item.assigned_agent_id || '');
+    const stillPending = !item._baseline && !item._excluded && !['accepted', 'rejected'].includes(item._review_status) &&
+      !item._api_uploaded && !(item._listing_uploads || []).length;
+    if (!assignedId || activeAgentIds.has(assignedId) || !stillPending) continue;
+    item._previous_inactive_agent_id = assignedId;
+    item._previous_inactive_agent_name = item.assigned_agent_name || '';
+    delete item.assigned_agent_id;
+    delete item.assigned_agent_name;
+    released += 1;
+  }
   const pending = Object.values(data)
     .filter(item => !item._baseline && !item._excluded && !item.assigned_agent_id && !hasExcludedDescription(item.description))
     .sort((a, b) => String(a.first_seen).localeCompare(String(b.first_seen)));
-  if (!pending.length) return 0;
-  const agents = await getDistributionAgents();
+  if (!pending.length) {
+    if (released) saveData(data, dataPath, csvPath);
+    return 0;
+  }
   for (const item of pending) {
     const index = Number(state.api_assignment_index || 0) % agents.length;
     const agent = agents[index];
     item.assigned_agent_id = agent.id;
     item.assigned_agent_name = agentDisplayName(agent);
     item._assigned_at = new Date().toISOString();
+    if (item._previous_inactive_agent_id) item._reassigned_from_inactive_at = item._assigned_at;
     delete item._assignment_error;
     state.api_assignment_index = Number(state.api_assignment_index || 0) + 1;
   }
@@ -1900,7 +2048,7 @@ async function hydrateListingUploadHistory() {
   const agentPayload = await websiteApiRequest('/api/Agents');
   websiteDirectoryAgents = responseItems(agentPayload)
     .map(agent => ({ ...agent, id: String(agent.userId ?? agent.user_id ?? agent.user?.id ?? agent.id ?? '') }))
-    .filter(agent => agent.id);
+    .filter(agent => agent.id && isAssignableApiAgent(agent));
   dashboardUploadAgents = responseItems(agentPayload)
     .map(agent => ({
       id: String(agent.userId ?? agent.user_id ?? agent.user?.id ?? agent.id ?? ''),
@@ -2021,7 +2169,7 @@ async function syncPendingWebsiteApartments(data, state, onlyApartmentId = null,
   /* Legacy publishing implementation retained temporarily for data migration
      reference. It is intentionally unreachable. */
   if (!process.env.WEBSITE_API_EMAIL || !process.env.WEBSITE_API_PASSWORD) return 0;
-  const ownerIds = savedOwnerIds();
+  const ownerIds = blockedOwnerIds();
   const pending = Object.values(data)
     .filter(item => !item._baseline && !item._excluded && !item._api_uploaded && !hasExcludedDescription(item.description) &&
       !belongsToSavedOwner(item, ownerIds) &&
@@ -2147,12 +2295,24 @@ async function scan(context, data, state, options) {
     console.log(`Search configured for ${byId.size} current listings from ${options.searches.length} district(s), ${options.pages} page(s) each. Importing the complete result set.`);
   }
 
+  const permanentKeys = permanentApartmentKeys(data, liveSsData || loadSsData());
+  let permanentlyDismissed = 0;
+  let alreadyKnown = 0;
   const toImport = cards.filter(card => {
+    if (permanentKeys.has(apartmentRegistryKey('MyHome', card.id))) { permanentlyDismissed += 1; return false; }
     const saved = data[card.id];
-    return !saved || (saved._baseline && !saved._excluded && !saved.title);
+    const eligible = !saved || (saved._baseline && !saved._excluded && !saved.title);
+    if (!eligible) alreadyKnown += 1;
+    return eligible;
   });
   watcherStatus.importTotal = toImport.length;
-  console.log(`Checked ${byId.size} listings across the configured pages; ${toImport.length} still need importing.`);
+  console.log(`Checked ${byId.size} listings across the configured pages; ${toImport.length} still need importing, ${alreadyKnown} already in the database, ${permanentlyDismissed} permanently dismissed (accepted/rejected/× elsewhere).`);
+  if (permanentlyDismissed) {
+    const dismissedIds = cards
+      .filter(card => permanentKeys.has(apartmentRegistryKey('MyHome', card.id)))
+      .map(card => card.id);
+    console.log(`  Permanently dismissed IDs from this search: ${dismissedIds.join(', ')}`);
+  }
 
   const repairs = cards.filter(card => {
     const saved = data[card.id];
@@ -2206,21 +2366,25 @@ async function scan(context, data, state, options) {
       watcherStatus.message = `Importing apartment ${index + 1} of ${importQueue.length} (ID ${card.id})…`;
       try {
         const item = await extractDetail(detailPage, card);
-        if (belongsToSavedOwner(item, savedOwnerIds())) {
+        if (belongsToSavedOwner(item, blockedOwnerIds())) {
           item._baseline = true;
           item._excluded = true;
           item._excluded_reason = 'owner_id';
           data[item.apartment_id] = item;
           saveData(data);
-          console.log(`FILTERED MyHome ID ${item.apartment_id} because owner ID ${item.owner_id} is already in Owners.`);
+          console.log(`FILTERED MyHome ID ${item.apartment_id} because owner ID ${item.owner_id} and phone match an Owners row that refuses cooperation.`);
           continue;
         }
-        if (hasExcludedDescription(item.description)) {
+        const myHomeDescriptionMatch = excludedDescriptionMatch(item.description);
+        if (myHomeDescriptionMatch) {
           item._baseline = true;
           item._excluded = true;
+          item._excluded_reason = 'description';
           data[item.apartment_id] = item;
           saveData(data);
-          console.log(`FILTERED MyHome ID ${item.apartment_id} because its description contains an excluded phrase.`);
+          const matchLabel = myHomeDescriptionMatch.type === 'phrase'
+            ? `matched phrase "${myHomeDescriptionMatch.phrase}"` : 'matched the 50% commission-context rule';
+          console.log(`FILTERED MyHome ID ${item.apartment_id} because its description ${matchLabel}: "${clean(item.description)}"`);
           continue;
         }
         item._baseline = false;
@@ -2259,6 +2423,7 @@ async function scan(context, data, state, options) {
 
 async function scanSs(context, data, state) {
   const cards = await requestSsCards(context);
+  const permanentKeys = permanentApartmentKeys(liveMyHomeData || loadData(), data);
   if (!state.ss_initialized || state.ss_engine_version !== 4) {
     for (const card of cards) {
       if (!data[card.id]) {
@@ -2280,7 +2445,7 @@ async function scanSs(context, data, state) {
   }
 
   const baselineTime = new Date(state.ss_initialized_at).getTime();
-  const unseen = cards.filter(card => !data[card.id]);
+  const unseen = cards.filter(card => !data[card.id] && !permanentKeys.has(apartmentRegistryKey('SS.ge', card.id)));
   const newest = unseen.filter(card => new Date(card.api.createDate).getTime() > baselineTime);
   const older = unseen.filter(card => new Date(card.api.createDate).getTime() <= baselineTime);
   for (const card of older) {
@@ -2301,21 +2466,25 @@ async function scanSs(context, data, state) {
     for (const card of newest.reverse()) {
       try {
         const item = await extractSsDetail(detailPage, card);
-        if (belongsToSavedOwner(item, savedOwnerIds())) {
+        if (belongsToSavedOwner(item, blockedOwnerIds())) {
           item._baseline = true;
           item._excluded = true;
           item._excluded_reason = 'owner_id';
           data[item.apartment_id] = item;
           saveData(data, SS_DATA_PATH, SS_CSV_PATH);
-          console.log(`FILTERED SS.ge ID ${item.apartment_id} because owner ID ${item.owner_id} is already in Owners.`);
+          console.log(`FILTERED SS.ge ID ${item.apartment_id} because owner ID ${item.owner_id} and phone match an Owners row that refuses cooperation.`);
           continue;
         }
-        if (hasExcludedDescription(item.description)) {
+        const ssDescriptionMatch = excludedDescriptionMatch(item.description);
+        if (ssDescriptionMatch) {
           item._baseline = true;
           item._excluded = true;
+          item._excluded_reason = 'description';
           data[item.apartment_id] = item;
           saveData(data, SS_DATA_PATH, SS_CSV_PATH);
-          console.log(`FILTERED SS.ge ID ${item.apartment_id} because its description contains an excluded phrase.`);
+          const matchLabel = ssDescriptionMatch.type === 'phrase'
+            ? `matched phrase "${ssDescriptionMatch.phrase}"` : 'matched the 50% commission-context rule';
+          console.log(`FILTERED SS.ge ID ${item.apartment_id} because its description ${matchLabel}: "${clean(item.description)}"`);
           continue;
         }
         item._baseline = false;
@@ -2357,12 +2526,18 @@ async function main() {
   liveMyHomeData = data;
   liveSsData = ssData;
   const state = loadState();
-  const restoredAccepted = restoreAcceptedDistrictRemovals(data) + restoreAcceptedDistrictRemovals(ssData);
-  const excludedMyHome = markExcludedDescriptions(data);
-  const excludedSs = markExcludedDescriptions(ssData);
+  for (const [source, sourceData] of [['MyHome', data], ['SS.ge', ssData]]) {
+    for (const item of Object.values(sourceData)) {
+      if (item._review_status === 'rejected') rememberRejectedApartment(item, source, { email: item._reviewed_by_email });
+    }
+  }
+  const resetScrapeHistory = runOneTimeScrapeHistoryReset(data, ssData, state);
+  if (resetScrapeHistory) console.log(`One-time reset removed ${resetScrapeHistory} saved non-ready scrape record(s); Owners and Ready For Upload were preserved.`);
+  const blockedOwners = blockedOwnerIds();
+  const myHomeFilters = refreshFilterExclusions(data, blockedOwners);
+  const ssFilters = refreshFilterExclusions(ssData, blockedOwners);
   const clearedStreetErrors = clearLegacyStreetUploadErrors(data) + clearLegacyStreetUploadErrors(ssData);
   const clearedStreetData = clearLegacyStreetData(data) + clearLegacyStreetData(ssData);
-  if (restoredAccepted) console.log(`Restored ${restoredAccepted} accepted apartment(s) hidden by earlier district removal.`);
   try {
     const named = await hydrateAssignedAgentNames(data) + await hydrateAssignedAgentNames(ssData);
     if (named) console.log(`Resolved display names for ${named} assigned apartment(s).`);
@@ -2376,8 +2551,32 @@ async function main() {
   saveData(ssData, SS_DATA_PATH, SS_CSV_PATH);
   if (clearedStreetErrors) console.log(`Cleared ${clearedStreetErrors} obsolete street-resolution upload error(s); those apartments will retry without streets.`);
   if (clearedStreetData) console.log(`Removed street/address data from ${clearedStreetData} saved apartment(s).`);
-  if (excludedMyHome + excludedSs) {
-    console.log(`Filtered ${excludedMyHome + excludedSs} existing listing(s) by description.`);
+  if (myHomeFilters.excluded + ssFilters.excluded) {
+    console.log(`Filtered ${myHomeFilters.excluded + ssFilters.excluded} existing listing(s) by description or a refusing owner.`);
+  }
+  if (myHomeFilters.restored + ssFilters.restored) {
+    console.log(`Restored ${myHomeFilters.restored + ssFilters.restored} listing(s) that no longer match the description or owner filters.`);
+  }
+  for (const [source, sourceData] of [['MyHome', data], ['SS.ge', ssData]]) {
+    const excludedNow = Object.values(sourceData).filter(item => item._excluded && !item._review_status);
+    if (!excludedNow.length) continue;
+    console.log(`Currently hidden ${source} listing(s) (${excludedNow.length}) and why:`);
+    for (const item of excludedNow) {
+      const match = excludedDescriptionMatch(item.description);
+      const matchLabel = match
+        ? match.type === 'phrase' ? `matched phrase "${match.phrase}"` : 'matched the 50% commission-context rule'
+        : item._excluded_reason === 'owner_id' ? 'owner refuses cooperation' : 'no current description match (stale exclusion)';
+      console.log(`  ID ${item.apartment_id} [${item._excluded_reason || 'unknown'}] ${matchLabel}${item.owner_id ? ` ownerId=${item.owner_id}` : ''}`);
+      console.log(`    full description: "${clean(item.description)}"`);
+    }
+  }
+  for (const [source, sourceData] of [['MyHome', data], ['SS.ge', ssData]]) {
+    const reviewed = Object.values(sourceData).filter(item => item._review_status === 'accepted' || item._review_status === 'rejected');
+    if (!reviewed.length) continue;
+    const rejected = reviewed.filter(item => item._review_status === 'rejected');
+    const accepted = reviewed.filter(item => item._review_status === 'accepted');
+    console.log(`${source} listings permanently out of All Apartments by review status: ${rejected.length} rejected (× button, gone forever), ${accepted.length} accepted (moved to Ready For Upload).`);
+    if (rejected.length) console.log(`  Rejected IDs: ${rejected.map(item => item.apartment_id).join(', ')}`);
   }
   console.log(`Saving results to ${CSV_PATH}`);
   console.log(`Saving SS.ge results to ${SS_CSV_PATH}`);

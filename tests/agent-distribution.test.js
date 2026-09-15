@@ -15,7 +15,8 @@ test('management includes new API agents outside the automatic distribution pool
     dashboardUploadAgents: [{ id: 'historical', name: 'Former agent' }],
     dashboardAccounts: () => [],
     clean: value => String(value || '').trim(),
-    agentDisplayName: agent => agent.name
+    agentDisplayName: agent => agent.name,
+    agentEmail: agent => agent.email || ''
   });
   vm.runInContext(source.slice(source.indexOf('function managementAgents('), source.indexOf('function buildTeamContent(')), context);
   const agents = vm.runInContext('managementAgents()', context);
@@ -25,12 +26,38 @@ test('management includes new API agents outside the automatic distribution pool
   assert.equal(vm.runInContext('managementAgents()', context).some(agent => agent.id === 'new'), false);
 });
 
+test('inactive and uploader accounts are omitted from assignment dropdowns', () => {
+  assert.doesNotMatch(source, /inactiveCurrent|\(inactive\)<\/option>/);
+  assert.match(source, /return assignableAgents\.map\(agent => `<option/);
+});
+
 test('pending apartments are persistently assigned in round-robin order', () => {
   assert.match(source, /const agents = await getDistributionAgents\(\)/);
   assert.match(source, /Number\(state\.api_assignment_index \|\| 0\) % agents\.length/);
   assert.match(source, /item\.assigned_agent_id = agent\.id/);
   assert.match(source, /state\.api_assignment_index = Number\(state\.api_assignment_index \|\| 0\) \+ 1/);
   assert.match(source, /saveData\(data, dataPath, csvPath\);\s*saveState\(state\)/);
+});
+
+test('assignment refreshes active API agents and reassigns inactive pending queues', () => {
+  const distributionStart = source.indexOf('async function getDistributionAgents');
+  const distributionEnd = source.indexOf('async function hydrateAssignedAgentNames');
+  assert.doesNotMatch(source.slice(distributionStart, distributionEnd), /if \(websiteApiAgents\.length\) return websiteApiAgents/);
+  assert.match(source, /const activeAgentIds = new Set\(agents\.map\(agent => String\(agent\.id\)\)\)/);
+  assert.match(source, /activeAgentIds\.has\(assignedId\) \|\| !stillPending/);
+  assert.match(source, /delete item\.assigned_agent_id/);
+  assert.match(source, /item\._reassigned_from_inactive_at = item\._assigned_at/);
+  assert.match(source, /Skipping inactive or non-agent configured Website API IDs/);
+  assert.match(source, /available\.filter\(agent => !configuredAgentIds\.has\(agent\.id\)\)/);
+  assert.doesNotMatch(source, /Configured Website API agent IDs were not found/);
+});
+
+test('all active agents receive apartments while admin and manager roles are excluded', () => {
+  assert.match(source, /function isAssignableApiAgent\(agent\)/);
+  assert.match(source, /if \(role\) return \/\(\^\|\[ _-\]\)agent/);
+  assert.match(source, /\.filter\(agent => agent\.id && isAssignableApiAgent\(agent\)\)/);
+  assert.doesNotMatch(source, /slice\(0, distributionCount\)/);
+  assert.doesNotMatch(source, /AGENT_DISTRIBUTION_COUNT/);
 });
 
 test('Website API upload is attributed to the assigned agent', () => {
@@ -59,4 +86,6 @@ test('profile transfer is restricted to explicitly selected apartments', () => {
   assert.match(source, /selectedKeys\.has\(`\$\{source\}:\$\{item\.apartment_id\}`\)/);
   assert.match(source, /transfer\(myHomeData, 'MyHome'\)/);
   assert.match(source, /transfer\(ssData, 'SS\.ge'\)/);
+  assert.match(source, /\['accepted', 'rejected'\]\.includes\(item\._review_status\)/);
+  assert.match(source, /waitingForReview \? `<input class="transfer-apartment-checkbox"/);
 });

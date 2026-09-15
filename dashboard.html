@@ -84,7 +84,7 @@
     </section>
 
     <nav class="district-filters" aria-label="Filter apartments by district">
-      <button id="clear-pending-apartments" class="clear-pending-apartments" type="button" hidden>Clear all pending apartments</button>
+      <button id="clear-pending-apartments" class="clear-pending-apartments" type="button" hidden>Clear my pending apartments</button>
       <button class="district-filter active" type="button" data-district="all">All</button>
       <span class="district-control"><button class="district-filter" type="button" data-district="Saburtalo">Saburtalo</button><button class="district-remove" type="button" data-district="Saburtalo" aria-label="Remove every Saburtalo apartment" title="Remove every Saburtalo apartment" hidden>×</button></span>
       <span class="district-control"><button class="district-filter" type="button" data-district="Vake">Vake</button><button class="district-remove" type="button" data-district="Vake" aria-label="Remove every Vake apartment" title="Remove every Vake apartment" hidden>×</button></span>
@@ -119,6 +119,10 @@
     managementNav.querySelectorAll('a').forEach(link => link.classList.toggle('active', link.dataset.view === managementNav.dataset.currentView));
     const ownersView = managementNav.dataset.currentView === 'owners';
     const teamView = managementNav.dataset.currentView === 'team';
+    // Set while a single agent's profile is open from Team profiles. Every
+    // removal made here must stay limited to that agent's apartments.
+    const profileAgentId = new URLSearchParams(location.search).get('agent') || '';
+    const removalQuery = extra => `${extra}${profileAgentId ? `&agent=${encodeURIComponent(profileAgentId)}` : ''}`;
     if (ownersView || teamView) {
       document.getElementById('admin-controls').hidden = true;
       document.querySelector('.district-filters').hidden = true;
@@ -187,7 +191,11 @@
       watcherConfig = config;
       document.getElementById('admin-controls').hidden = ownersView || teamView || !config.canAdmin;
       document.querySelectorAll('.district-remove').forEach(button => { button.hidden = !config.canAdmin; });
-      document.getElementById('clear-pending-apartments').hidden = !config.canAdmin || managementNav.dataset.currentView !== 'all';
+      const clearPendingButton = document.getElementById('clear-pending-apartments');
+      clearPendingButton.hidden = managementNav.dataset.currentView !== 'all';
+      clearPendingButton.textContent = profileAgentId
+        ? "Clear this agent's pending apartments"
+        : config.canManage ? 'Reset scraped apartments' : 'Clear my pending apartments';
       managementNav.hidden = false;
       managementNav.querySelectorAll('[data-management-role]').forEach(item => { item.hidden = !config.canManage; });
       managementNav.querySelectorAll('[data-management-only]').forEach(item => {
@@ -284,15 +292,23 @@
       .catch(error => { message.textContent = error.message; });
     document.getElementById('clear-pending-apartments').addEventListener('click', async event => {
       const button = event.currentTarget;
-      if (!confirm('Clear all pending apartments from every district and both sources? Ready For Upload and Owners will be kept.')) return;
+      const globalRemoval = watcherConfig?.canManage && !profileAgentId;
+      const prompt = globalRemoval
+        ? 'Reset all previously scraped apartments for every agent and source? Ready For Upload and Owners will be kept. Rejected IDs will stay blocked.'
+        : profileAgentId
+          ? "Clear only this agent's pending apartments from every district and source? Other agents, Ready For Upload, and Owners will be kept."
+          : 'Clear only your pending apartments from every district and source? Other agents, Ready For Upload, and Owners will be kept.';
+      if (!confirm(prompt)) return;
       reviewInteractionUntil = Date.now() + 5 * 60 * 1000;
       button.disabled = true;
       button.setAttribute('aria-busy', 'true');
       try {
-        const response = await fetch('/api/apartments?scope=all-pending', { method: 'DELETE' });
+        const response = await fetch(`/api/apartments?${removalQuery('scope=all-pending')}`, { method: 'DELETE' });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'Could not clear pending apartments');
-        alert(`Cleared ${result.removed} pending apartment(s) across all districts. Ready For Upload and Owners were preserved.`);
+        alert(globalRemoval
+          ? `Reset ${result.removed} scraped apartment record(s). Ready For Upload and Owners were preserved; the scraper can now discover active listings again.`
+          : `Cleared ${result.removed} pending apartment(s)${profileAgentId ? ' for this agent' : ''}. Other agents and Ready For Upload were not affected.`);
         location.reload();
       } catch (error) {
         alert(error.message);
@@ -308,12 +324,14 @@
       event.preventDefault();
       event.stopPropagation();
       const district = button.dataset.district;
-      if (!confirm(`Remove every saved apartment from ${district}? This cannot be undone.`)) return;
+      if (!confirm(profileAgentId
+        ? `Remove this agent's waiting ${district} apartments? Ready For Upload and other agents are kept.`
+        : `Remove every waiting apartment from ${district}? Ready For Upload is kept.`)) return;
       reviewInteractionUntil = Date.now() + 5 * 60 * 1000;
       button.disabled = true;
       button.setAttribute('aria-busy', 'true');
       try {
-        const response = await fetch(`/api/apartments?district=${encodeURIComponent(district)}`, { method: 'DELETE' });
+        const response = await fetch(`/api/apartments?${removalQuery(`district=${encodeURIComponent(district)}`)}`, { method: 'DELETE' });
         const result = await response.json();
         if (!response.ok) throw new Error(result.error || 'Could not remove district apartments');
         document.querySelectorAll(`tr.apartment-row[data-district="${CSS.escape(district)}"]`).forEach(row => {
@@ -321,7 +339,7 @@
           row.remove();
         });
         alert(`Removed ${result.removed} waiting apartment(s) from ${district}.${result.preserved ? ` Kept ${result.preserved} in Ready For Upload.` : ''}`);
-        location.href = '/';
+        location.href = profileAgentId ? location.pathname + location.search : '/';
       } catch (error) {
         button.disabled = false;
         button.removeAttribute('aria-busy');

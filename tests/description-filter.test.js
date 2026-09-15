@@ -2,7 +2,9 @@
 
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { hasExcludedDescription } = require('../description-filter');
+const {
+  DESCRIPTION_KEYWORDS_ENABLED, hasExcludedDescription, matchDescriptionKeywords
+} = require('../description-filter');
 
 const excludedDescriptions = [
   'აგენტებმა არ დამირეკოთ',
@@ -35,14 +37,44 @@ const excludedDescriptions = [
   'განაცხადი — აგენტებმა, არ დამირეკოთ!'
 ];
 
-test('rejects descriptions containing agent and commission exclusion phrases', () => {
-  for (const description of excludedDescriptions) {
-    assert.equal(hasExcludedDescription(description), true, description);
+test('keyword filtering is currently disabled, so every description is imported', () => {
+  // Requested 2026-09-15: stop filtering by description keywords so every
+  // scraped apartment gets in, regardless of phrasing.
+  assert.equal(DESCRIPTION_KEYWORDS_ENABLED, false);
+  for (const description of [...excludedDescriptions, 'სააგენტოებთან ვთანამშრომლობ მხოლოდ 50%-ით']) {
+    assert.equal(hasExcludedDescription(description), false, description);
   }
 });
 
-test('does not reject unrelated numbers or ordinary owner descriptions', () => {
-  assert.equal(hasExcludedDescription('ქირავდება 50 მ² ბინა მესაკუთრისგან'), false);
-  assert.equal(hasExcludedDescription('ფასი 150% არ არის და სააგენტოს საკომისიო არ წერია'), false);
-  assert.equal(hasExcludedDescription('Owner listing, call any time'), false);
+test('the underlying keyword matcher still recognizes agent and commission phrases', () => {
+  // Kept correct and tested so filtering can be re-enabled later by flipping
+  // DESCRIPTION_KEYWORDS_ENABLED back to true.
+  for (const description of excludedDescriptions) {
+    assert.notEqual(matchDescriptionKeywords(description), null, description);
+  }
+});
+
+test('the underlying matcher does not flag unrelated numbers or ordinary listings', () => {
+  assert.equal(matchDescriptionKeywords('ქირავდება 50 მ² ბინა მესაკუთრისგან'), null);
+  assert.equal(matchDescriptionKeywords('ფასი 150% არ არის და სააგენტოს საკომისიო არ წერია'), null);
+  assert.equal(matchDescriptionKeywords('Owner listing, call any time'), null);
+});
+
+test('the underlying matcher treats an ordinary deposit percentage as unrelated', () => {
+  assert.equal(matchDescriptionKeywords('წინასწარი გადახდა 50%'), null);
+  assert.equal(matchDescriptionKeywords('დეპოზიტი 50 % პირველი თვის გადახდით'), null);
+  assert.equal(matchDescriptionKeywords('50% ავანსად, დანარჩენი შეყვანისას'), null);
+  assert.equal(matchDescriptionKeywords('Deposit 50% required before move-in'), null);
+});
+
+test('the underlying matcher still catches a half-commission offer near "50%"', () => {
+  assert.notEqual(matchDescriptionKeywords('სააგენტოებთან ვთანამშრომლობ მხოლოდ 50%-ით'), null);
+  assert.notEqual(matchDescriptionKeywords('აგენტს ვურჩევ 50% საკომისიოს'), null);
+  assert.notEqual(matchDescriptionKeywords('agent commission only 50% accepted'), null);
+});
+
+test('the underlying matcher still lets an owner say they are not an agent', () => {
+  assert.equal(matchDescriptionKeywords('მე არ ვარ აგენტი, ბინის მესაკუთრე ვარ'), null);
+  assert.equal(matchDescriptionKeywords('ar var agenti, mesakutre var'), null);
+  assert.notEqual(matchDescriptionKeywords('არ ვარ აგენტი და აგენტებმა არ დამირეკოთ'), null);
 });
