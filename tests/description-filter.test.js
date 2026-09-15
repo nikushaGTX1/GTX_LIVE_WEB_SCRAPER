@@ -47,6 +47,21 @@ test('does not reject unrelated numbers or ordinary owner descriptions', () => {
   assert.equal(hasExcludedDescription('Owner listing, call any time'), false);
 });
 
+test('an ordinary deposit or prepayment percentage does not exclude the listing', () => {
+  // These are routine Tbilisi rental terms with no agent or commission
+  // context nearby, and must keep importing normally.
+  assert.equal(hasExcludedDescription('წინასწარი გადახდა 50%'), false);
+  assert.equal(hasExcludedDescription('დეპოზიტი 50 % პირველი თვის გადახდით'), false);
+  assert.equal(hasExcludedDescription('50% ავანსად, დანარჩენი შეყვანისას'), false);
+  assert.equal(hasExcludedDescription('Deposit 50% required before move-in'), false);
+});
+
+test('a half-commission offer near "50%" still excludes the listing', () => {
+  assert.equal(hasExcludedDescription('სააგენტოებთან ვთანამშრომლობ მხოლოდ 50%-ით'), true);
+  assert.equal(hasExcludedDescription('აგენტს ვურჩევ 50% საკომისიოს'), true);
+  assert.equal(hasExcludedDescription('agent commission only 50% accepted'), true);
+});
+
 test('an owner saying they are not an agent still cooperates with us', () => {
   assert.equal(hasExcludedDescription('მე არ ვარ აგენტი, ბინის მესაკუთრე ვარ'), false);
   assert.equal(hasExcludedDescription('ar var agenti, mesakutre var'), false);

@@ -47,12 +47,34 @@ const NORMALIZED_EXCLUDED_PHRASES = EXCLUDED_DESCRIPTION_PHRASES.map(normalizedD
 // negated form before the phrase scan runs.
 const NEGATED_AGENT_CLAIM_RE = /(^| )(?:არ|ar) (?:ვარ აგენტი|var agenti)(?= |$)/gu;
 
+// A bare "50%" only means "I'll split commission in half with an agent" when
+// it sits near actual commission/cooperation wording. Tbilisi rental ads
+// routinely quote a "50% deposit" or "50% upfront" with no agent involved at
+// all, so a plain number match would wrongly exclude ordinary owner listings.
+const COMMISSION_CONTEXT_STEMS = [
+  'თანამშრომ', 'შეთანხმ', 'თანხმ', 'საკომისიო', 'კომისია', 'აგენტ', 'მაკლერ',
+  'tanamshrom', 'shetankhm', 'shetankhm', 'tankhm', 'tanxm', 'komisi', 'agent', 'makler'
+];
+
+function hasCommissionHalfMention(description) {
+  const tokens = description.split(' ').filter(Boolean);
+  for (let index = 0; index < tokens.length; index += 1) {
+    let matchedLength = 0;
+    if (tokens[index] === '50%') matchedLength = 1;
+    else if (tokens[index] === '50' && tokens[index + 1] === '%') matchedLength = 2;
+    if (!matchedLength) continue;
+    const windowText = tokens.slice(Math.max(0, index - 4), index + matchedLength + 4).join(' ');
+    if (COMMISSION_CONTEXT_STEMS.some(stem => windowText.includes(stem))) return true;
+  }
+  return false;
+}
+
 function hasExcludedDescription(value) {
   const description = normalizedDescription(value).replace(NEGATED_AGENT_CLAIM_RE, '$1');
   if (!description) return false;
 
   return NORMALIZED_EXCLUDED_PHRASES.some(phrase => description.includes(phrase)) ||
-    /(?:^|[^\p{N}])50\s*%(?:$|[^\p{N}])/u.test(description);
+    hasCommissionHalfMention(description);
 }
 
 module.exports = {
