@@ -433,6 +433,24 @@ function permanentApartmentKeys(myHomeData = {}, ssData = {}) {
   return keys;
 }
 
+function runOneTimeScrapeHistoryReset(data, ssData, state) {
+  const resetVersion = 1;
+  if (Number(state.scrape_history_reset_version || 0) >= resetVersion) return 0;
+  let removed = 0;
+  for (const sourceData of [data, ssData]) {
+    for (const [key, item] of Object.entries(sourceData)) {
+      if (item._review_status === 'accepted') continue;
+      delete sourceData[key];
+      removed += 1;
+    }
+  }
+  fs.writeFileSync(REMOVED_APARTMENTS_PATH, '{}\n', 'utf8');
+  state.scrape_history_reset_version = resetVersion;
+  state.scrape_history_reset_at = new Date().toISOString();
+  saveState(state);
+  return removed;
+}
+
 function ownersDataForSubject(viewer, subject) {
   if (!subject || ownersPathFor(subject) === ownersPathFor(viewer)) return ownersData(viewer);
   const agentId = String(subject.agentId || '');
@@ -2461,6 +2479,8 @@ async function main() {
       if (item._review_status === 'rejected') rememberRejectedApartment(item, source, { email: item._reviewed_by_email });
     }
   }
+  const resetScrapeHistory = runOneTimeScrapeHistoryReset(data, ssData, state);
+  if (resetScrapeHistory) console.log(`One-time reset removed ${resetScrapeHistory} saved non-ready scrape record(s); Owners and Ready For Upload were preserved.`);
   const excludedMyHome = markExcludedDescriptions(data);
   const excludedSs = markExcludedDescriptions(ssData);
   const clearedStreetErrors = clearLegacyStreetUploadErrors(data) + clearLegacyStreetUploadErrors(ssData);

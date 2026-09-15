@@ -24,3 +24,10 @@ test('district-removed apartment IDs are scraper duplicates but bulk-cleared IDs
   assert.match(source, /Object\.keys\(removedApartmentRegistry\(\)\)/);
   assert.doesNotMatch(source, /restoreAccidentallyExcludedApartments/);
 });
+
+test('startup performs one versioned scrape-history reset without deleting ready apartments', () => {
+  assert.match(source, /function runOneTimeScrapeHistoryReset\(data, ssData, state\)/);
+  assert.match(source, /if \(item\._review_status === 'accepted'\) continue/);
+  assert.match(source, /state\.scrape_history_reset_version = resetVersion/);
+  assert.match(source, /Owners and Ready For Upload were preserved/);
+});
