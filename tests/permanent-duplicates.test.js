@@ -17,3 +17,9 @@ test('reject action writes a durable rejection registry entry', () => {
   assert.match(source, /if \(body\.action === 'rejected'\) rememberRejectedApartment/);
   assert.match(source, /fs\.writeFileSync\(REJECTED_APARTMENTS_PATH/);
 });
+
+test('manually removed apartment IDs are permanent scraper duplicates', () => {
+  assert.match(source, /function rememberRemovedApartment\(item, source, viewer\)/);
+  assert.match(source, /Object\.keys\(removedApartmentRegistry\(\)\)/);
+  assert.doesNotMatch(source, /restoreAccidentallyExcludedApartments/);
+});

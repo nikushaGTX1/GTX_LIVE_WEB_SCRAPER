@@ -38,10 +38,8 @@ test('managers share the complete owner database and team profiles link to each 
   assert.match(source, /central\.rows\.filter\(row => assignedListingIds\.has\(clean\(row\[0\]\)\)\)/);
 });
 
-test('removed queue apartments can be scraped again instead of remaining duplicate exclusions', () => {
+test('removed queue apartments are deleted from the live queue', () => {
   assert.match(source, /delete source\.data\[itemKey\]/);
-  assert.match(source, /function restoreAccidentallyExcludedApartments\(data\)/);
-  assert.match(source, /Pending apartments cleared/);
 });
 
 test('accepted apartment comments synchronize to matching owner listing IDs', () => {

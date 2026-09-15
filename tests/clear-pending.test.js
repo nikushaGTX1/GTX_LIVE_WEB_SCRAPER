@@ -24,6 +24,7 @@ function run(query, role = 'admin') {
     pathname: '/api/apartments', request: { method: 'DELETE' },
     requestUrl: new URL(`http://localhost/api/apartments${query}`),
     viewer: { role, email: 'viewer@test', agentId: 'agent-1' }, clean: value => String(value || '').trim(),
+    rememberRemovedApartment: () => {},
     liveMyHomeData: myhome, liveSsData: ss,
     saveData: data => saves.push(data), SS_DATA_PATH: 'ss.json', SS_CSV_PATH: 'ss.csv',
     response: { writeHead: code => { status = code; }, end: body => { result = JSON.parse(body); } }
@@ -70,4 +71,9 @@ test('district deletion remains limited to the requested district', () => {
   assert.deepEqual(r.myhome.other, r.before.myhome.other);
   assert.deepEqual(r.ss, r.before.ss);
   assert.deepEqual(r.myhome.ready, r.before.myhome.ready);
+});
+
+test('removed apartment IDs are recorded before queue deletion', () => {
+  assert.match(route, /rememberRemovedApartment\(item, source\.name, viewer\)/);
+  assert.match(source, /const REMOVED_APARTMENTS_PATH = path\.join\(DATA_ROOT, 'removed-apartments\.json'\)/);
 });

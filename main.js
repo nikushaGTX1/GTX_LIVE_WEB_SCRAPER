@@ -34,6 +34,7 @@ const WATCHER_CONFIG_PATH = path.join(DATA_ROOT, 'watcher-config.json');
 const OWNERS_PATH = path.join(DATA_ROOT, 'owners.json');
 const ADMIN_OWNERS_PATH = path.join(DATA_ROOT, 'owners-admin.json');
 const REJECTED_APARTMENTS_PATH = path.join(DATA_ROOT, 'rejected-apartments.json');
+const REMOVED_APARTMENTS_PATH = path.join(DATA_ROOT, 'removed-apartments.json');
 const PROFILE_PATH = process.env.WATCHER_PROFILE || path.join(DATA_ROOT, '.browser-profile');
 const IS_HOSTED = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID);
 const SS_SCRAPER_ENABLED = String(process.env.ENABLE_SS_SCRAPER || '').toLowerCase() === 'true';
@@ -134,19 +135,6 @@ function markExcludedDescriptions(data) {
     }
   }
   return count;
-}
-
-function restoreAccidentallyExcludedApartments(data) {
-  let restored = 0;
-  for (const item of Object.values(data)) {
-    if (!item._excluded || !/^(?:District removed|Agent district removed|Pending apartments cleared|All pending apartments cleared|Agent pending apartments cleared) by /i.test(item._excluded_reason || '')) continue;
-    delete item._excluded;
-    delete item._excluded_reason;
-    delete item._excluded_at;
-    item._baseline = false;
-    restored += 1;
-  }
-  return restored;
 }
 
 function match(pattern, text, group = 1) {
@@ -394,6 +382,19 @@ function rejectedApartmentRegistry() {
   return readJsonFile(REJECTED_APARTMENTS_PATH);
 }
 
+function removedApartmentRegistry() {
+  return readJsonFile(REMOVED_APARTMENTS_PATH);
+}
+
+function rememberRemovedApartment(item, source, viewer) {
+  const registry = removedApartmentRegistry();
+  const key = apartmentRegistryKey(source, item.apartment_id);
+  registry[key] = {
+    apartmentId: clean(item.apartment_id), source, removedAt: new Date().toISOString(), removedBy: viewer?.email || ''
+  };
+  fs.writeFileSync(REMOVED_APARTMENTS_PATH, JSON.stringify(registry, null, 2), 'utf8');
+}
+
 function rememberRejectedApartment(item, source, viewer) {
   const registry = rejectedApartmentRegistry();
   const key = apartmentRegistryKey(source, item.apartment_id);
@@ -405,7 +406,7 @@ function rememberRejectedApartment(item, source, viewer) {
 }
 
 function permanentApartmentKeys(myHomeData = {}, ssData = {}) {
-  const keys = new Set(Object.keys(rejectedApartmentRegistry()));
+  const keys = new Set([...Object.keys(rejectedApartmentRegistry()), ...Object.keys(removedApartmentRegistry())]);
   for (const [source, data] of [['MyHome', myHomeData], ['SS.ge', ssData]]) {
     for (const item of Object.values(data)) {
       if (item._review_status === 'accepted' || item._review_status === 'rejected') {
@@ -1070,8 +1071,8 @@ function startWebServer() {
       }
       const normalizedDistrict = district.toLocaleLowerCase('en-US');
       const sources = [
-        { data: liveMyHomeData || loadData(), save: data => saveData(data) },
-        { data: liveSsData || loadSsData(), save: data => saveData(data, SS_DATA_PATH, SS_CSV_PATH) }
+        { name: 'MyHome', data: liveMyHomeData || loadData(), save: data => saveData(data) },
+        { name: 'SS.ge', data: liveSsData || loadSsData(), save: data => saveData(data, SS_DATA_PATH, SS_CSV_PATH) }
       ];
       let removed = 0;
       let preserved = 0;
@@ -1086,6 +1087,7 @@ function startWebServer() {
           }
           if (item._excluded) continue;
           if (allPending && (item._baseline || item._review_status === 'rejected')) continue;
+          rememberRemovedApartment(item, source.name, viewer);
           delete source.data[itemKey];
           removed += 1;
           changed = true;
@@ -2434,12 +2436,10 @@ async function main() {
       if (item._review_status === 'rejected') rememberRejectedApartment(item, source, { email: item._reviewed_by_email });
     }
   }
-  const restoredAccepted = restoreAccidentallyExcludedApartments(data) + restoreAccidentallyExcludedApartments(ssData);
   const excludedMyHome = markExcludedDescriptions(data);
   const excludedSs = markExcludedDescriptions(ssData);
   const clearedStreetErrors = clearLegacyStreetUploadErrors(data) + clearLegacyStreetUploadErrors(ssData);
   const clearedStreetData = clearLegacyStreetData(data) + clearLegacyStreetData(ssData);
-  if (restoredAccepted) console.log(`Restored ${restoredAccepted} accepted apartment(s) hidden by earlier district removal.`);
   try {
     const named = await hydrateAssignedAgentNames(data) + await hydrateAssignedAgentNames(ssData);
     if (named) console.log(`Resolved display names for ${named} assigned apartment(s).`);
