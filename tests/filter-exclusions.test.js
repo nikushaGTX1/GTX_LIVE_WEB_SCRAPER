@@ -25,19 +25,25 @@ function refresh(data, rows = []) {
 
 const ownerRow = (ownerId, phone, agreement) => [ownerId, phone, '', '', '', '', '', '', agreement];
 
-test('a listing stays excluded only while it still matches a filter', () => {
+test('a stale exclusion is released once nothing currently matches', () => {
   const data = {
     stale: { apartment_id: 'stale', description: 'ჩვეულებრივი ბინა', _baseline: true, _excluded: true },
-    matching: { apartment_id: 'matching', description: 'აგენტებმა არ დამირეკოთ' },
     clean: { apartment_id: 'clean', description: 'ქირავდება ბინა' }
   };
   const result = refresh(data);
-  assert.deepEqual(result, { excluded: 1, restored: 1 });
+  assert.deepEqual(result, { excluded: 0, restored: 1 });
   assert.equal(data.stale._excluded, undefined);
   assert.equal(data.stale._baseline, false);
-  assert.equal(data.matching._excluded, true);
-  assert.equal(data.matching._excluded_reason, 'description');
   assert.equal(data.clean._excluded, undefined);
+});
+
+test('description keyword filtering is disabled, so a matching description does not exclude the listing', () => {
+  // Requested 2026-09-15: every apartment must import regardless of
+  // description phrasing, until keyword filtering is turned back on.
+  const data = { matching: { apartment_id: 'matching', description: 'აგენტებმა არ დამირეკოთ' } };
+  const result = refresh(data);
+  assert.deepEqual(result, { excluded: 0, restored: 0 });
+  assert.equal(data.matching._excluded, undefined);
 });
 
 test('a cooperating owner is released while a refusing owner stays filtered', () => {

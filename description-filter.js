@@ -69,11 +69,16 @@ function hasCommissionHalfMention(description) {
   return false;
 }
 
+// Requested (2026-09-15): stop keyword-filtering descriptions for now so
+// every scraped apartment is imported, regardless of "don't call me, agents"
+// phrasing or commission wording. The matcher below is kept intact and
+// tested so this can be flipped back on later by setting this to true.
+const DESCRIPTION_KEYWORDS_ENABLED = false;
+
 // Returns what actually matched (a phrase, or the 50% commission-context
-// rule), or null when nothing does. hasExcludedDescription is a thin wrapper
-// over this so a diagnostic caller can report the specific reason instead of
-// a generic "contains an excluded phrase".
-function excludedDescriptionMatch(value) {
+// rule), or null when nothing does. Ignores DESCRIPTION_KEYWORDS_ENABLED, so
+// tests and diagnostics can still see the underlying logic is intact.
+function matchDescriptionKeywords(value) {
   const description = normalizedDescription(value).replace(NEGATED_AGENT_CLAIM_RE, '$1');
   if (!description) return null;
 
@@ -83,13 +88,22 @@ function excludedDescriptionMatch(value) {
   return null;
 }
 
+// The function the scraper actually calls. Returns null while keyword
+// filtering is disabled, so hasExcludedDescription is always false and every
+// apartment gets imported no matter what its description says.
+function excludedDescriptionMatch(value) {
+  return DESCRIPTION_KEYWORDS_ENABLED ? matchDescriptionKeywords(value) : null;
+}
+
 function hasExcludedDescription(value) {
   return Boolean(excludedDescriptionMatch(value));
 }
 
 module.exports = {
+  DESCRIPTION_KEYWORDS_ENABLED,
   EXCLUDED_DESCRIPTION_PHRASES,
   excludedDescriptionMatch,
   hasExcludedDescription,
+  matchDescriptionKeywords,
   normalizedDescription
 };
