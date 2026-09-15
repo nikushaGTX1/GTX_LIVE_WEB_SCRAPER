@@ -352,22 +352,32 @@ function applyAcceptedCommentsToOwners(data) {
 
 function ownersData(viewer) {
   const accountPath = ownersPathFor(viewer);
-  let data;
-  if (viewer?.role === 'admin' && !fs.existsSync(accountPath)) {
-    let rows = [];
-    const legacyPaths = fs.readdirSync(DATA_ROOT)
+  let data = normalizedOwnersData(readJsonFile(accountPath));
+  if (['admin', 'manager'].includes(viewer?.role)) {
+    const agentPaths = fs.readdirSync(DATA_ROOT)
       .filter(name => /^owners-[a-f0-9]{24}\.json$/i.test(name))
       .map(name => path.join(DATA_ROOT, name));
-    if (fs.existsSync(OWNERS_PATH)) legacyPaths.unshift(OWNERS_PATH);
-    for (const legacyPath of legacyPaths) rows = mergeOwnerRows(rows, normalizedOwnersData(readJsonFile(legacyPath)).rows);
-    data = { headers: OWNER_HEADERS, rows };
-  } else {
-    data = normalizedOwnersData(readJsonFile(accountPath));
+    if (fs.existsSync(OWNERS_PATH)) agentPaths.unshift(OWNERS_PATH);
+    for (const agentPath of agentPaths) data.rows = mergeOwnerRows(data.rows, normalizedOwnersData(readJsonFile(agentPath)).rows);
   }
-  if (applyAcceptedCommentsToOwners(data) || !fs.existsSync(accountPath)) {
+  const beforeComments = JSON.stringify(data);
+  applyAcceptedCommentsToOwners(data);
+  if (beforeComments !== JSON.stringify(data) || !fs.existsSync(accountPath) || ['admin', 'manager'].includes(viewer?.role)) {
     fs.writeFileSync(accountPath, JSON.stringify(data, null, 2), 'utf8');
   }
   return data;
+}
+
+function removeOwnersFromEveryDatabase(ownerId = '') {
+  const paths = [ADMIN_OWNERS_PATH, OWNERS_PATH, ...fs.readdirSync(DATA_ROOT)
+    .filter(name => /^owners-[a-f0-9]{24}\.json$/i.test(name))
+    .map(name => path.join(DATA_ROOT, name))];
+  for (const ownerPath of new Set(paths)) {
+    if (!fs.existsSync(ownerPath)) continue;
+    const data = normalizedOwnersData(readJsonFile(ownerPath));
+    data.rows = ownerId ? data.rows.filter(row => clean(row[0]) !== ownerId) : [];
+    fs.writeFileSync(ownerPath, JSON.stringify(data, null, 2), 'utf8');
+  }
 }
 
 function savedOwnerIds() {
@@ -1260,11 +1270,17 @@ function startWebServer() {
     if (pathname === '/api/owners' && request.method === 'DELETE') {
       try {
         const data = ownersData(viewer);
-        if (requestUrl.searchParams.get('all') === 'true') data.rows = [];
+        const management = ['admin', 'manager'].includes(viewer.role);
+        if (requestUrl.searchParams.get('all') === 'true') {
+          data.rows = [];
+          if (management) removeOwnersFromEveryDatabase();
+        }
         else {
           const index = Number(requestUrl.searchParams.get('index'));
           if (!Number.isInteger(index) || index < 0 || index >= data.rows.length) throw new Error('Owner row was not found');
+          const ownerId = clean(data.rows[index][0]);
           data.rows.splice(index, 1);
+          if (management && ownerId) removeOwnersFromEveryDatabase(ownerId);
         }
         fs.writeFileSync(ownersPathFor(viewer), JSON.stringify(data, null, 2), 'utf8');
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
