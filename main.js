@@ -2301,7 +2301,7 @@ async function scan(context, data, state, options) {
           item._excluded_reason = 'owner_id';
           data[item.apartment_id] = item;
           saveData(data);
-          console.log(`FILTERED MyHome ID ${item.apartment_id} because owner ID ${item.owner_id} is already in Owners.`);
+          console.log(`FILTERED MyHome ID ${item.apartment_id} because owner ID ${item.owner_id} and phone match Owners.`);
           continue;
         }
         if (hasExcludedDescription(item.description)) {
@@ -2397,7 +2397,7 @@ async function scanSs(context, data, state) {
           item._excluded_reason = 'owner_id';
           data[item.apartment_id] = item;
           saveData(data, SS_DATA_PATH, SS_CSV_PATH);
-          console.log(`FILTERED SS.ge ID ${item.apartment_id} because owner ID ${item.owner_id} is already in Owners.`);
+          console.log(`FILTERED SS.ge ID ${item.apartment_id} because owner ID ${item.owner_id} and phone match Owners.`);
           continue;
         }
         if (hasExcludedDescription(item.description)) {
