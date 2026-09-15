@@ -536,11 +536,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
   const canSelectTransfer = canReassign && Boolean(selectedAgent);
   const assignmentOptions = item => {
     const currentId = String(item.assigned_agent_id || '');
-    const current = agents.find(agent => agent.id === currentId);
-    const inactiveCurrent = currentId && !assignableAgents.some(agent => agent.id === currentId)
-      ? `<option value="${html(currentId)}" selected disabled>${html(current?.name || item.assigned_agent_name || currentId)} (inactive)</option>`
-      : '';
-    return inactiveCurrent + assignableAgents.map(agent => `<option value="${html(agent.id)}"${currentId === agent.id ? ' selected' : ''}>${html(agent.name)}</option>`).join('');
+    return assignableAgents.map(agent => `<option value="${html(agent.id)}"${currentId === agent.id ? ' selected' : ''}>${html(agent.name)}</option>`).join('');
   };
 
   const rows = combined.map(item => {

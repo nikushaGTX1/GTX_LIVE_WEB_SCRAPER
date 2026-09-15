@@ -26,6 +26,11 @@ test('management includes new API agents outside the automatic distribution pool
   assert.equal(vm.runInContext('managementAgents()', context).some(agent => agent.id === 'new'), false);
 });
 
+test('inactive and uploader accounts are omitted from assignment dropdowns', () => {
+  assert.doesNotMatch(source, /inactiveCurrent|\(inactive\)<\/option>/);
+  assert.match(source, /return assignableAgents\.map\(agent => `<option/);
+});
+
 test('pending apartments are persistently assigned in round-robin order', () => {
   assert.match(source, /const agents = await getDistributionAgents\(\)/);
   assert.match(source, /Number\(state\.api_assignment_index \|\| 0\) % agents\.length/);
