@@ -385,10 +385,28 @@ function savedOwnerIds() {
   return ownerIdsFromRows(ownersData({ role: 'admin', email: 'owners-inbox' }).rows);
 }
 
+function ownersDataForSubject(viewer, subject) {
+  if (!subject || ownersPathFor(subject) === ownersPathFor(viewer)) return ownersData(viewer);
+  const agentId = String(subject.agentId || '');
+  const assignedListingIds = new Set(
+    [...Object.values(readJsonFile(DATA_PATH)), ...Object.values(readJsonFile(SS_DATA_PATH))]
+      .filter(item => String(item.assigned_agent_id || '') === agentId ||
+        (item._listing_uploads || []).some(upload => String(upload.agentUserId || '') === agentId))
+      .map(item => clean(item.apartment_id))
+      .filter(Boolean)
+  );
+  const central = ownersData(viewer);
+  let rows = central.rows.filter(row => assignedListingIds.has(clean(row[0])));
+  const privatePath = ownersPathFor(subject);
+  if (fs.existsSync(privatePath)) {
+    rows = mergeOwnerRows(rows, normalizedOwnersData(readJsonFile(privatePath)).rows);
+  }
+  return { headers: OWNER_HEADERS, rows };
+}
+
 function buildOwnersContent(viewer, subject = viewer) {
-  const data = ownersData(viewer);
   const readOnly = ownersPathFor(subject) !== ownersPathFor(viewer);
-  const displayed = readOnly ? ownersData(subject) : data;
+  const displayed = ownersDataForSubject(viewer, subject);
   const districts = [...new Set(displayed.rows.map(row => clean(row[2])).filter(Boolean))]
     .sort((left, right) => left.localeCompare(right, 'ka', { sensitivity: 'base' }));
   const head = `${displayed.headers.map((header, columnIndex) => {
@@ -556,7 +574,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
     ? `${profileBanner}${acceptedSearch}<table class="results-table"><thead><tr>${canSelectTransfer ? '<th class="transfer-select-heading"><input id="select-all-apartments" type="checkbox" aria-label="Select all visible apartments"></th>' : ''}<th class="review-heading">Review</th><th>Source</th><th>ID</th><th>Received</th><th>District</th><th>Assigned agent</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th><th>Website</th>${showManagementComments ? '<th>Accepted by</th><th>Comment</th>' : ''}</tr></thead><tbody>${rows}</tbody></table>`
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
-    .replace('{{LISTING_COUNT}}', String(view === 'owners' ? ownersData(selectedOwner || viewer).rows.length : view === 'team' ? assignableAgents.length : combined.length))
+    .replace('{{LISTING_COUNT}}', String(view === 'owners' ? ownersDataForSubject(viewer, selectedOwner || viewer).rows.length : view === 'team' ? assignableAgents.length : combined.length))
     .replace('{{LOGGED_IN_AS}}', html(viewer?.name || viewer?.email || process.env.DASHBOARD_DISPLAY_USER || process.env.WEBSITE_API_EMAIL || 'Local viewer'))
     .replace('{{LOGGED_IN_ROLE}}', html(viewer?.role || 'admin'))
     .replace('{{CURRENT_VIEW}}', ['owners', 'accepted', 'team'].includes(view) ? view : 'all')
