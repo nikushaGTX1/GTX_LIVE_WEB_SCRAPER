@@ -6,7 +6,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { pathToFileURL } = require('node:url');
 const { chromium } = require('playwright');
-const { hasExcludedDescription } = require('./description-filter');
+const { excludedDescriptionMatch, hasExcludedDescription } = require('./description-filter');
 const { belongsToSavedOwner, nonCooperatingOwnerIds } = require('./owner-filter');
 
 const DISTRICT_SEARCHES = [];
@@ -2344,13 +2344,16 @@ async function scan(context, data, state, options) {
           console.log(`FILTERED MyHome ID ${item.apartment_id} because owner ID ${item.owner_id} and phone match an Owners row that refuses cooperation.`);
           continue;
         }
-        if (hasExcludedDescription(item.description)) {
+        const myHomeDescriptionMatch = excludedDescriptionMatch(item.description);
+        if (myHomeDescriptionMatch) {
           item._baseline = true;
           item._excluded = true;
           item._excluded_reason = 'description';
           data[item.apartment_id] = item;
           saveData(data);
-          console.log(`FILTERED MyHome ID ${item.apartment_id} because its description contains an excluded phrase: "${clean(item.description).slice(0, 120)}"`);
+          const matchLabel = myHomeDescriptionMatch.type === 'phrase'
+            ? `matched phrase "${myHomeDescriptionMatch.phrase}"` : 'matched the 50% commission-context rule';
+          console.log(`FILTERED MyHome ID ${item.apartment_id} because its description ${matchLabel}: "${clean(item.description)}"`);
           continue;
         }
         item._baseline = false;
@@ -2441,13 +2444,16 @@ async function scanSs(context, data, state) {
           console.log(`FILTERED SS.ge ID ${item.apartment_id} because owner ID ${item.owner_id} and phone match an Owners row that refuses cooperation.`);
           continue;
         }
-        if (hasExcludedDescription(item.description)) {
+        const ssDescriptionMatch = excludedDescriptionMatch(item.description);
+        if (ssDescriptionMatch) {
           item._baseline = true;
           item._excluded = true;
           item._excluded_reason = 'description';
           data[item.apartment_id] = item;
           saveData(data, SS_DATA_PATH, SS_CSV_PATH);
-          console.log(`FILTERED SS.ge ID ${item.apartment_id} because its description contains an excluded phrase: "${clean(item.description).slice(0, 120)}"`);
+          const matchLabel = ssDescriptionMatch.type === 'phrase'
+            ? `matched phrase "${ssDescriptionMatch.phrase}"` : 'matched the 50% commission-context rule';
+          console.log(`FILTERED SS.ge ID ${item.apartment_id} because its description ${matchLabel}: "${clean(item.description)}"`);
           continue;
         }
         item._baseline = false;
@@ -2525,8 +2531,12 @@ async function main() {
     if (!excludedNow.length) continue;
     console.log(`Currently hidden ${source} listing(s) (${excludedNow.length}) and why:`);
     for (const item of excludedNow) {
-      const snippet = clean(item.description).slice(0, 80);
-      console.log(`  ID ${item.apartment_id} [${item._excluded_reason || 'unknown'}]${item.owner_id ? ` ownerId=${item.owner_id}` : ''}${snippet ? ` desc="${snippet}${item.description.length > 80 ? '…' : ''}"` : ''}`);
+      const match = excludedDescriptionMatch(item.description);
+      const matchLabel = match
+        ? match.type === 'phrase' ? `matched phrase "${match.phrase}"` : 'matched the 50% commission-context rule'
+        : item._excluded_reason === 'owner_id' ? 'owner refuses cooperation' : 'no current description match (stale exclusion)';
+      console.log(`  ID ${item.apartment_id} [${item._excluded_reason || 'unknown'}] ${matchLabel}${item.owner_id ? ` ownerId=${item.owner_id}` : ''}`);
+      console.log(`    full description: "${clean(item.description)}"`);
     }
   }
   console.log(`Saving results to ${CSV_PATH}`);

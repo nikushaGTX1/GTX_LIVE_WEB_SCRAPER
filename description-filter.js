@@ -69,16 +69,27 @@ function hasCommissionHalfMention(description) {
   return false;
 }
 
-function hasExcludedDescription(value) {
+// Returns what actually matched (a phrase, or the 50% commission-context
+// rule), or null when nothing does. hasExcludedDescription is a thin wrapper
+// over this so a diagnostic caller can report the specific reason instead of
+// a generic "contains an excluded phrase".
+function excludedDescriptionMatch(value) {
   const description = normalizedDescription(value).replace(NEGATED_AGENT_CLAIM_RE, '$1');
-  if (!description) return false;
+  if (!description) return null;
 
-  return NORMALIZED_EXCLUDED_PHRASES.some(phrase => description.includes(phrase)) ||
-    hasCommissionHalfMention(description);
+  const phraseIndex = NORMALIZED_EXCLUDED_PHRASES.findIndex(phrase => description.includes(phrase));
+  if (phraseIndex >= 0) return { type: 'phrase', phrase: EXCLUDED_DESCRIPTION_PHRASES[phraseIndex] };
+  if (hasCommissionHalfMention(description)) return { type: 'commission-50%' };
+  return null;
+}
+
+function hasExcludedDescription(value) {
+  return Boolean(excludedDescriptionMatch(value));
 }
 
 module.exports = {
   EXCLUDED_DESCRIPTION_PHRASES,
+  excludedDescriptionMatch,
   hasExcludedDescription,
   normalizedDescription
 };
