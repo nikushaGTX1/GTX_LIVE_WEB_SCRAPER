@@ -7,7 +7,7 @@ const crypto = require('node:crypto');
 const { pathToFileURL } = require('node:url');
 const { chromium } = require('playwright');
 const { hasExcludedDescription } = require('./description-filter');
-const { belongsToSavedOwner, ownerIdsFromRows } = require('./owner-filter');
+const { belongsToSavedOwner, nonCooperatingOwnerIds } = require('./owner-filter');
 
 const DISTRICT_SEARCHES = [];
 const SEARCH_PRESETS = [
@@ -33,8 +33,10 @@ const STATE_PATH = path.join(DATA_ROOT, 'watcher-state.json');
 const WATCHER_CONFIG_PATH = path.join(DATA_ROOT, 'watcher-config.json');
 const OWNERS_PATH = path.join(DATA_ROOT, 'owners.json');
 const ADMIN_OWNERS_PATH = path.join(DATA_ROOT, 'owners-admin.json');
+// The only persistent exclusion store: apartment IDs a person dismissed with
+// the × button. Nothing else may be written here, so an apartment that merely
+// left All Apartments can be discovered again on a later scan.
 const REJECTED_APARTMENTS_PATH = path.join(DATA_ROOT, 'rejected-apartments.json');
-const REMOVED_APARTMENTS_PATH = path.join(DATA_ROOT, 'removed-apartments.json');
 const PROFILE_PATH = process.env.WATCHER_PROFILE || path.join(DATA_ROOT, '.browser-profile');
 const IS_HOSTED = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID);
 const SS_SCRAPER_ENABLED = String(process.env.ENABLE_SS_SCRAPER || '').toLowerCase() === 'true';
@@ -125,16 +127,33 @@ function clearLegacyStreetData(data) {
   return changed;
 }
 
-function markExcludedDescriptions(data) {
-  let count = 0;
+// Description phrases and owner agreements both change over time, so the two
+// automatic filters are re-applied on every start. A listing stays hidden only
+// while it still matches a filter; reviewed apartments are never touched here,
+// which keeps Ready For Upload and × dismissals exactly as they are.
+function refreshFilterExclusions(data, blockedOwners) {
+  let excluded = 0;
+  let restored = 0;
   for (const item of Object.values(data)) {
-    if (hasExcludedDescription(item.description)) {
+    if (item._review_status) continue;
+    const reason = hasExcludedDescription(item.description)
+      ? 'description'
+      : belongsToSavedOwner(item, blockedOwners) ? 'owner_id' : '';
+    const filteredBefore = ['description', 'owner_id'].includes(item._excluded_reason) ||
+      (item._excluded === true && !item._excluded_reason);
+    if (reason) {
+      if (!item._excluded) excluded += 1;
       item._baseline = true;
       item._excluded = true;
-      count += 1;
+      item._excluded_reason = reason;
+    } else if (filteredBefore) {
+      delete item._excluded;
+      delete item._excluded_reason;
+      item._baseline = false;
+      restored += 1;
     }
   }
-  return count;
+  return { excluded, restored };
 }
 
 function match(pattern, text, group = 1) {
@@ -380,8 +399,10 @@ function removeOwnersFromEveryDatabase(ownerId = '') {
   }
 }
 
-function savedOwnerIds() {
-  return ownerIdsFromRows(ownersData({ role: 'admin', email: 'owners-inbox' }).rows);
+// Owners saved with an agreement note that refuses cooperation. Owners we do
+// work with stay out of this set so their listings keep being imported.
+function blockedOwnerIds() {
+  return nonCooperatingOwnerIds(ownersData({ role: 'admin', email: 'owners-inbox' }).rows);
 }
 
 function apartmentRegistryKey(source, apartmentId) {
@@ -390,25 +411,6 @@ function apartmentRegistryKey(source, apartmentId) {
 
 function rejectedApartmentRegistry() {
   return readJsonFile(REJECTED_APARTMENTS_PATH);
-}
-
-function removedApartmentRegistry() {
-  return readJsonFile(REMOVED_APARTMENTS_PATH);
-}
-
-function rememberRemovedApartment(item, source, viewer) {
-  const registry = removedApartmentRegistry();
-  const key = apartmentRegistryKey(source, item.apartment_id);
-  registry[key] = {
-    apartmentId: clean(item.apartment_id), source, removedAt: new Date().toISOString(), removedBy: viewer?.email || ''
-  };
-  fs.writeFileSync(REMOVED_APARTMENTS_PATH, JSON.stringify(registry, null, 2), 'utf8');
-}
-
-function forgetRemovedApartment(item, source) {
-  const registry = removedApartmentRegistry();
-  delete registry[apartmentRegistryKey(source, item.apartment_id)];
-  fs.writeFileSync(REMOVED_APARTMENTS_PATH, JSON.stringify(registry, null, 2), 'utf8');
 }
 
 function rememberRejectedApartment(item, source, viewer) {
@@ -421,8 +423,12 @@ function rememberRejectedApartment(item, source, viewer) {
   fs.writeFileSync(REJECTED_APARTMENTS_PATH, JSON.stringify(registry, null, 2), 'utf8');
 }
 
+// Listings the scraper must never surface again: the IDs dismissed with the ×
+// button (kept in rejected-apartments.json even after the record is deleted)
+// plus the IDs still held in a live queue as reviewed. Clearing a pending list
+// or a district deliberately adds nothing here.
 function permanentApartmentKeys(myHomeData = {}, ssData = {}) {
-  const keys = new Set([...Object.keys(rejectedApartmentRegistry()), ...Object.keys(removedApartmentRegistry())]);
+  const keys = new Set(Object.keys(rejectedApartmentRegistry()));
   for (const [source, data] of [['MyHome', myHomeData], ['SS.ge', ssData]]) {
     for (const item of Object.values(data)) {
       if (item._review_status === 'accepted' || item._review_status === 'rejected') {
@@ -444,7 +450,6 @@ function runOneTimeScrapeHistoryReset(data, ssData, state) {
       removed += 1;
     }
   }
-  fs.writeFileSync(REMOVED_APARTMENTS_PATH, '{}\n', 'utf8');
   state.scrape_history_reset_version = resetVersion;
   state.scrape_history_reset_at = new Date().toISOString();
   saveState(state);
@@ -537,7 +542,7 @@ function buildTeamContent(items, agents) {
 }
 
 function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
-  const ownerIds = savedOwnerIds();
+  const ownerIds = blockedOwnerIds();
   const allVisible = [
     ...Object.values(readJsonFile(DATA_PATH)).map(item => ({ ...item, source: item.source || 'MyHome' })),
     ...Object.values(readJsonFile(SS_DATA_PATH)).map(item => ({ ...item, source: 'SS.ge' }))
@@ -1103,10 +1108,17 @@ function startWebServer() {
         response.end(JSON.stringify({ error: 'Apartment removal is not available for this account' }));
         return;
       }
-      const normalizedDistrict = district.toLocaleLowerCase('en-US');
-      if (allPending && canRemoveGlobally) {
-        fs.writeFileSync(REMOVED_APARTMENTS_PATH, '{}\n', 'utf8');
+      // Management clears one agent's queue while a profile is open and the
+      // whole board otherwise; an agent is always limited to their own queue.
+      const agentScope = canRemoveGlobally
+        ? clean(requestUrl.searchParams.get('agent'))
+        : String(viewer.agentId || '');
+      if (!canRemoveGlobally && !agentScope) {
+        response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: 'This account has no agent profile to clear' }));
+        return;
       }
+      const normalizedDistrict = district.toLocaleLowerCase('en-US');
       const sources = [
         { name: 'MyHome', data: liveMyHomeData || loadData(), save: data => saveData(data) },
         { name: 'SS.ge', data: liveSsData || loadSsData(), save: data => saveData(data, SS_DATA_PATH, SS_CSV_PATH) }
@@ -1116,15 +1128,16 @@ function startWebServer() {
       for (const source of sources) {
         let changed = false;
         for (const [itemKey, item] of Object.entries(source.data)) {
-          if (!canRemoveGlobally && String(item.assigned_agent_id || '') !== String(viewer.agentId || '')) continue;
+          if (agentScope && String(item.assigned_agent_id || '') !== agentScope) continue;
           if (!allPending && clean(item.district).toLocaleLowerCase('en-US') !== normalizedDistrict) continue;
-          if (item._review_status === 'accepted') {
+          // Ready For Upload and anything already published stay untouched.
+          if (item._review_status === 'accepted' || item._api_uploaded) {
             preserved += 1;
             continue;
           }
           if (!allPending && item._excluded) continue;
-          if (allPending) forgetRemovedApartment(item, source.name);
-          else rememberRemovedApartment(item, source.name, viewer);
+          // Clearing a list is not a dismissal: nothing is written to the
+          // rejected registry, so the scraper may find these listings again.
           delete source.data[itemKey];
           removed += 1;
           changed = true;
@@ -1132,7 +1145,7 @@ function startWebServer() {
         if (changed) source.save(source.data);
       }
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-      response.end(JSON.stringify({ ok: true, district, removed, preserved }));
+      response.end(JSON.stringify({ ok: true, district, removed, preserved, agentId: agentScope }));
       return;
     }
     if (pathname === '/api/apartments/import-word' && request.method === 'POST') {
@@ -1385,7 +1398,7 @@ function saveData(data, dataPath = DATA_PATH, csvPath = CSV_PATH) {
   fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf8');
   fs.renameSync(tempPath, dataPath);
 
-  const ownerIds = savedOwnerIds();
+  const ownerIds = blockedOwnerIds();
   const rows = Object.values(data)
     .filter(row => !row._baseline && !row._excluded && row._review_status !== 'rejected' && !hasExcludedDescription(row.description) && !belongsToSavedOwner(row, ownerIds))
     .sort((a, b) => String(b.first_seen).localeCompare(String(a.first_seen)));
@@ -2155,7 +2168,7 @@ async function syncPendingWebsiteApartments(data, state, onlyApartmentId = null,
   /* Legacy publishing implementation retained temporarily for data migration
      reference. It is intentionally unreachable. */
   if (!process.env.WEBSITE_API_EMAIL || !process.env.WEBSITE_API_PASSWORD) return 0;
-  const ownerIds = savedOwnerIds();
+  const ownerIds = blockedOwnerIds();
   const pending = Object.values(data)
     .filter(item => !item._baseline && !item._excluded && !item._api_uploaded && !hasExcludedDescription(item.description) &&
       !belongsToSavedOwner(item, ownerIds) &&
@@ -2322,18 +2335,19 @@ async function scan(context, data, state, options) {
       watcherStatus.message = `Importing apartment ${index + 1} of ${importQueue.length} (ID ${card.id})…`;
       try {
         const item = await extractDetail(detailPage, card);
-        if (belongsToSavedOwner(item, savedOwnerIds())) {
+        if (belongsToSavedOwner(item, blockedOwnerIds())) {
           item._baseline = true;
           item._excluded = true;
           item._excluded_reason = 'owner_id';
           data[item.apartment_id] = item;
           saveData(data);
-          console.log(`FILTERED MyHome ID ${item.apartment_id} because owner ID ${item.owner_id} and phone match Owners.`);
+          console.log(`FILTERED MyHome ID ${item.apartment_id} because owner ID ${item.owner_id} and phone match an Owners row that refuses cooperation.`);
           continue;
         }
         if (hasExcludedDescription(item.description)) {
           item._baseline = true;
           item._excluded = true;
+          item._excluded_reason = 'description';
           data[item.apartment_id] = item;
           saveData(data);
           console.log(`FILTERED MyHome ID ${item.apartment_id} because its description contains an excluded phrase.`);
@@ -2418,18 +2432,19 @@ async function scanSs(context, data, state) {
     for (const card of newest.reverse()) {
       try {
         const item = await extractSsDetail(detailPage, card);
-        if (belongsToSavedOwner(item, savedOwnerIds())) {
+        if (belongsToSavedOwner(item, blockedOwnerIds())) {
           item._baseline = true;
           item._excluded = true;
           item._excluded_reason = 'owner_id';
           data[item.apartment_id] = item;
           saveData(data, SS_DATA_PATH, SS_CSV_PATH);
-          console.log(`FILTERED SS.ge ID ${item.apartment_id} because owner ID ${item.owner_id} and phone match Owners.`);
+          console.log(`FILTERED SS.ge ID ${item.apartment_id} because owner ID ${item.owner_id} and phone match an Owners row that refuses cooperation.`);
           continue;
         }
         if (hasExcludedDescription(item.description)) {
           item._baseline = true;
           item._excluded = true;
+          item._excluded_reason = 'description';
           data[item.apartment_id] = item;
           saveData(data, SS_DATA_PATH, SS_CSV_PATH);
           console.log(`FILTERED SS.ge ID ${item.apartment_id} because its description contains an excluded phrase.`);
@@ -2481,8 +2496,9 @@ async function main() {
   }
   const resetScrapeHistory = runOneTimeScrapeHistoryReset(data, ssData, state);
   if (resetScrapeHistory) console.log(`One-time reset removed ${resetScrapeHistory} saved non-ready scrape record(s); Owners and Ready For Upload were preserved.`);
-  const excludedMyHome = markExcludedDescriptions(data);
-  const excludedSs = markExcludedDescriptions(ssData);
+  const blockedOwners = blockedOwnerIds();
+  const myHomeFilters = refreshFilterExclusions(data, blockedOwners);
+  const ssFilters = refreshFilterExclusions(ssData, blockedOwners);
   const clearedStreetErrors = clearLegacyStreetUploadErrors(data) + clearLegacyStreetUploadErrors(ssData);
   const clearedStreetData = clearLegacyStreetData(data) + clearLegacyStreetData(ssData);
   try {
@@ -2498,8 +2514,11 @@ async function main() {
   saveData(ssData, SS_DATA_PATH, SS_CSV_PATH);
   if (clearedStreetErrors) console.log(`Cleared ${clearedStreetErrors} obsolete street-resolution upload error(s); those apartments will retry without streets.`);
   if (clearedStreetData) console.log(`Removed street/address data from ${clearedStreetData} saved apartment(s).`);
-  if (excludedMyHome + excludedSs) {
-    console.log(`Filtered ${excludedMyHome + excludedSs} existing listing(s) by description.`);
+  if (myHomeFilters.excluded + ssFilters.excluded) {
+    console.log(`Filtered ${myHomeFilters.excluded + ssFilters.excluded} existing listing(s) by description or a refusing owner.`);
+  }
+  if (myHomeFilters.restored + ssFilters.restored) {
+    console.log(`Restored ${myHomeFilters.restored + ssFilters.restored} listing(s) that no longer match the description or owner filters.`);
   }
   console.log(`Saving results to ${CSV_PATH}`);
   console.log(`Saving SS.ge results to ${SS_CSV_PATH}`);

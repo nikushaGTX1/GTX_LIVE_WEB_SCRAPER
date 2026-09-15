@@ -46,3 +46,10 @@ test('does not reject unrelated numbers or ordinary owner descriptions', () => {
   assert.equal(hasExcludedDescription('ფასი 150% არ არის და სააგენტოს საკომისიო არ წერია'), false);
   assert.equal(hasExcludedDescription('Owner listing, call any time'), false);
 });
+
+test('an owner saying they are not an agent still cooperates with us', () => {
+  assert.equal(hasExcludedDescription('მე არ ვარ აგენტი, ბინის მესაკუთრე ვარ'), false);
+  assert.equal(hasExcludedDescription('ar var agenti, mesakutre var'), false);
+  // The negation only clears that one claim; another refusal still excludes.
+  assert.equal(hasExcludedDescription('არ ვარ აგენტი და აგენტებმა არ დამირეკოთ'), true);
+});

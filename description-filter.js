@@ -42,8 +42,13 @@ function normalizedDescription(value) {
 
 const NORMALIZED_EXCLUDED_PHRASES = EXCLUDED_DESCRIPTION_PHRASES.map(normalizedDescription);
 
+// "არ ვარ აგენტი" ("I am not an agent") is an owner telling us they are the
+// owner, so it must not be read as the excluded "ვარ აგენტი" claim. Drop the
+// negated form before the phrase scan runs.
+const NEGATED_AGENT_CLAIM_RE = /(^| )(?:არ|ar) (?:ვარ აგენტი|var agenti)(?= |$)/gu;
+
 function hasExcludedDescription(value) {
-  const description = normalizedDescription(value);
+  const description = normalizedDescription(value).replace(NEGATED_AGENT_CLAIM_RE, '$1');
   if (!description) return false;
 
   return NORMALIZED_EXCLUDED_PHRASES.some(phrase => description.includes(phrase)) ||

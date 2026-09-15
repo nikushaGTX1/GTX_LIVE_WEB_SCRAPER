@@ -2,27 +2,55 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 
-test('accepted and rejected apartment IDs are global permanent duplicates', () => {
-  assert.match(source, /const REJECTED_APARTMENTS_PATH = path\.join\(DATA_ROOT, 'rejected-apartments\.json'\)/);
-  assert.match(source, /function permanentApartmentKeys\(myHomeData = \{\}, ssData = \{\}\)/);
-  assert.match(source, /item\._review_status === 'accepted' \|\| item\._review_status === 'rejected'/);
-  assert.match(source, /permanentKeys\.has\(apartmentRegistryKey\('MyHome', card\.id\)\)/);
-  assert.match(source, /permanentKeys\.has\(apartmentRegistryKey\('SS\.ge', card\.id\)\)/);
-});
+function permanentKeys(registry, myHomeData, ssData) {
+  const context = {
+    result: null,
+    readJsonFile: () => registry,
+    REJECTED_APARTMENTS_PATH: 'rejected-apartments.json',
+    clean: value => String(value ?? '').trim(),
+    myHomeData,
+    ssData
+  };
+  const helpers = source.slice(source.indexOf('function apartmentRegistryKey('), source.indexOf('function runOneTimeScrapeHistoryReset('));
+  vm.runInNewContext(`${helpers}\nresult = permanentApartmentKeys(myHomeData, ssData);`, context);
+  return context.result;
+}
 
-test('reject action writes a durable rejection registry entry', () => {
+test('only the × button writes the persistent exclusion registry', () => {
+  assert.match(source, /const REJECTED_APARTMENTS_PATH = path\.join\(DATA_ROOT, 'rejected-apartments\.json'\)/);
   assert.match(source, /if \(body\.action === 'rejected'\) rememberRejectedApartment/);
   assert.match(source, /fs\.writeFileSync\(REJECTED_APARTMENTS_PATH/);
+  // The registry is keyed by the listing's stable source ID, never by title,
+  // address or price.
+  assert.match(source, /function apartmentRegistryKey\(source, apartmentId\) \{\n\s+return `\$\{source === 'SS\.ge' \? 'SS\.ge' : 'MyHome'\}:\$\{clean\(apartmentId\)\}`/);
+  assert.equal(source.match(/fs\.writeFileSync\(REJECTED_APARTMENTS_PATH/g).length, 1);
 });
 
-test('district-removed apartment IDs are scraper duplicates but bulk-cleared IDs are forgotten', () => {
-  assert.match(source, /function rememberRemovedApartment\(item, source, viewer\)/);
-  assert.match(source, /function forgetRemovedApartment\(item, source\)/);
-  assert.match(source, /Object\.keys\(removedApartmentRegistry\(\)\)/);
+test('removing an apartment from a list never persists it as a duplicate', () => {
+  assert.doesNotMatch(source, /removed-apartments\.json|rememberRemovedApartment|forgetRemovedApartment|removedApartmentRegistry/);
   assert.doesNotMatch(source, /restoreAccidentallyExcludedApartments/);
+});
+
+test('dismissed IDs stay blocked for both sources while unreviewed IDs do not', () => {
+  const keys = permanentKeys(
+    { 'MyHome:111': { apartmentId: '111' }, 'SS.ge:222': { apartmentId: '222' } },
+    { 333: { apartment_id: '333', _review_status: 'accepted' }, 444: { apartment_id: '444' } },
+    { 555: { apartment_id: '555', _review_status: 'rejected' } }
+  );
+  assert.equal(keys.has('MyHome:111'), true);
+  assert.equal(keys.has('SS.ge:222'), true);
+  assert.equal(keys.has('MyHome:333'), true);
+  assert.equal(keys.has('SS.ge:555'), true);
+  assert.equal(keys.has('MyHome:444'), false);
+});
+
+test('both scrapers consult the exclusion keys before importing a listing', () => {
+  assert.match(source, /permanentKeys\.has\(apartmentRegistryKey\('MyHome', card\.id\)\)/);
+  assert.match(source, /permanentKeys\.has\(apartmentRegistryKey\('SS\.ge', card\.id\)\)/);
 });
 
 test('startup performs one versioned scrape-history reset without deleting ready apartments', () => {
