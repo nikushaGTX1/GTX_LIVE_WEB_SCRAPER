@@ -2275,13 +2275,23 @@ async function scan(context, data, state, options) {
   }
 
   const permanentKeys = permanentApartmentKeys(data, liveSsData || loadSsData());
+  let permanentlyDismissed = 0;
+  let alreadyKnown = 0;
   const toImport = cards.filter(card => {
-    if (permanentKeys.has(apartmentRegistryKey('MyHome', card.id))) return false;
+    if (permanentKeys.has(apartmentRegistryKey('MyHome', card.id))) { permanentlyDismissed += 1; return false; }
     const saved = data[card.id];
-    return !saved || (saved._baseline && !saved._excluded && !saved.title);
+    const eligible = !saved || (saved._baseline && !saved._excluded && !saved.title);
+    if (!eligible) alreadyKnown += 1;
+    return eligible;
   });
   watcherStatus.importTotal = toImport.length;
-  console.log(`Checked ${byId.size} listings across the configured pages; ${toImport.length} still need importing.`);
+  console.log(`Checked ${byId.size} listings across the configured pages; ${toImport.length} still need importing, ${alreadyKnown} already in the database, ${permanentlyDismissed} permanently dismissed (accepted/rejected/× elsewhere).`);
+  if (permanentlyDismissed) {
+    const dismissedIds = cards
+      .filter(card => permanentKeys.has(apartmentRegistryKey('MyHome', card.id)))
+      .map(card => card.id);
+    console.log(`  Permanently dismissed IDs from this search: ${dismissedIds.join(', ')}`);
+  }
 
   const repairs = cards.filter(card => {
     const saved = data[card.id];
@@ -2538,6 +2548,14 @@ async function main() {
       console.log(`  ID ${item.apartment_id} [${item._excluded_reason || 'unknown'}] ${matchLabel}${item.owner_id ? ` ownerId=${item.owner_id}` : ''}`);
       console.log(`    full description: "${clean(item.description)}"`);
     }
+  }
+  for (const [source, sourceData] of [['MyHome', data], ['SS.ge', ssData]]) {
+    const reviewed = Object.values(sourceData).filter(item => item._review_status === 'accepted' || item._review_status === 'rejected');
+    if (!reviewed.length) continue;
+    const rejected = reviewed.filter(item => item._review_status === 'rejected');
+    const accepted = reviewed.filter(item => item._review_status === 'accepted');
+    console.log(`${source} listings permanently out of All Apartments by review status: ${rejected.length} rejected (× button, gone forever), ${accepted.length} accepted (moved to Ready For Upload).`);
+    if (rejected.length) console.log(`  Rejected IDs: ${rejected.map(item => item.apartment_id).join(', ')}`);
   }
   console.log(`Saving results to ${CSV_PATH}`);
   console.log(`Saving SS.ge results to ${SS_CSV_PATH}`);
