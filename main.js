@@ -545,8 +545,9 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
       : item._api_error
         ? `<span class="website-upload error" title="${html(item._api_error)}">Retrying</span>`
         : '<span class="website-upload pending">Pending</span>';
+    const waitingForReview = item._review_status !== 'accepted';
     const apartmentRow = `<tr data-apartment-id="${html(item.apartment_id)}" data-apartment-source="${html(item.source)}" data-district="${html(item.district || 'Other')}" class="apartment-row ${item._review_status === 'accepted' ? 'review-accepted' : ''}">
-      ${canSelectTransfer ? `<td class="transfer-select-cell"><input class="transfer-apartment-checkbox" type="checkbox" aria-label="Select apartment ${html(item.apartment_id)} for transfer"></td>` : ''}
+      ${canSelectTransfer ? `<td class="transfer-select-cell">${waitingForReview ? `<input class="transfer-apartment-checkbox" type="checkbox" aria-label="Select waiting apartment ${html(item.apartment_id)} for transfer">` : ''}</td>` : ''}
       <td class="review-cell">
         <div class="review-buttons">
           ${view === 'accepted' ? '' : `<button class="review-button accept-button${item._review_status === 'accepted' ? ' selected' : ''}" type="button" title="${item._review_status === 'accepted' ? 'Accepted' : 'Accept apartment'}" aria-label="Accept apartment" aria-pressed="${item._review_status === 'accepted' ? 'true' : 'false'}">✓</button>`}
@@ -998,7 +999,7 @@ function startWebServer() {
         const transfer = (data, source) => {
           let changed = false;
           for (const item of Object.values(data)) {
-            if (item._baseline || item._excluded || item._review_status === 'rejected') continue;
+            if (item._baseline || item._excluded || ['accepted', 'rejected'].includes(item._review_status)) continue;
             if (String(item.assigned_agent_id || '') !== fromAgentId) continue;
             if (!selectedKeys.has(`${source}:${item.apartment_id}`)) continue;
             item.assigned_agent_id = target.id;

@@ -75,4 +75,6 @@ test('profile transfer is restricted to explicitly selected apartments', () => {
   assert.match(source, /selectedKeys\.has\(`\$\{source\}:\$\{item\.apartment_id\}`\)/);
   assert.match(source, /transfer\(myHomeData, 'MyHome'\)/);
   assert.match(source, /transfer\(ssData, 'SS\.ge'\)/);
+  assert.match(source, /\['accepted', 'rejected'\]\.includes\(item\._review_status\)/);
+  assert.match(source, /waitingForReview \? `<input class="transfer-apartment-checkbox"/);
 });
