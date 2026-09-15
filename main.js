@@ -36,6 +36,7 @@ const ADMIN_OWNERS_PATH = path.join(DATA_ROOT, 'owners-admin.json');
 const PROFILE_PATH = process.env.WATCHER_PROFILE || path.join(DATA_ROOT, '.browser-profile');
 const IS_HOSTED = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID);
 const SS_SCRAPER_ENABLED = String(process.env.ENABLE_SS_SCRAPER || '').toLowerCase() === 'true';
+const FORCE_REIMPORT = String(process.env.FORCE_REIMPORT || '').toLowerCase() === 'true';
 
 const FIELDS = [
   'apartment_id', 'owner_id', 'district', 'assigned_agent_id', 'title', 'phone', 'price', 'rooms', 'bedrooms', 'area_m2',
@@ -1361,24 +1362,24 @@ function searchKey(searchUrl, pageCount) {
 }
 
 async function collectApiCards(searchUrl, pageCount, district = 'Unknown') {
-  const requests = [];
+  // pageCount is a safety cap, not a target: MyHome's result count varies over
+  // time, so we keep requesting pages until the site itself returns an empty
+  // one instead of assuming the configured count covers every listing.
+  const byId = new Map();
   for (let number = 1; number <= pageCount; number += 1) {
-    requests.push(fetch(apiUrl(searchUrl, number), {
+    const response = await fetch(apiUrl(searchUrl, number), {
       headers: {
         'x-website-key': 'myhome',
         locale: 'ka',
         referer: 'https://www.myhome.ge/'
       }
-    }));
-  }
-  const responses = await Promise.all(requests);
-  const byId = new Map();
-  for (const response of responses) {
+    });
     if (!response.ok) throw new Error(`MyHome feed returned HTTP ${response.status}`);
     const payload = await response.json();
     if (!payload.result || !Array.isArray(payload.data?.data)) {
       throw new Error(payload.errors?.message?.join?.(', ') || 'Unexpected MyHome feed response');
     }
+    if (!payload.data.data.length) break;
     for (const item of payload.data.data) {
       const id = String(item.id);
       const slug = item.dynamic_slug || item.href_lang?.ka || item.middle_slug || 'gancxadeba';
@@ -2114,6 +2115,26 @@ async function scan(context, data, state, options) {
   const cards = await collectDistrictCards(options.searches, options.pages);
   const byId = new Map(cards.map(card => [card.id, card]));
   watcherStatus.found = byId.size;
+
+  // If FORCE_REIMPORT is set, clear baseline/excluded flags for all current listings
+  // so they will be re-imported on this run.
+  if (FORCE_REIMPORT) {
+    let cleared = 0;
+    for (const [id, card] of byId) {
+      const saved = data[id];
+      if (saved && (saved._baseline || saved._excluded)) {
+        saved._baseline = false;
+        saved._excluded = false;
+        delete saved._excluded_reason;
+        delete saved._excluded_at;
+        cleared++;
+      }
+    }
+    if (cleared) {
+      saveData(data);
+      console.log(`FORCE_REIMPORT: Cleared baseline/excluded flags for ${cleared} apartment(s).`);
+    }
+  }
   const activeSearchKey = options.searches
     .map(search => `${search.district}:${searchKey(search.url, options.pages)}`)
     .sort().join('||');
