@@ -33,6 +33,7 @@ const STATE_PATH = path.join(DATA_ROOT, 'watcher-state.json');
 const WATCHER_CONFIG_PATH = path.join(DATA_ROOT, 'watcher-config.json');
 const OWNERS_PATH = path.join(DATA_ROOT, 'owners.json');
 const ADMIN_OWNERS_PATH = path.join(DATA_ROOT, 'owners-admin.json');
+const REJECTED_APARTMENTS_PATH = path.join(DATA_ROOT, 'rejected-apartments.json');
 const PROFILE_PATH = process.env.WATCHER_PROFILE || path.join(DATA_ROOT, '.browser-profile');
 const IS_HOSTED = Boolean(process.env.RAILWAY_ENVIRONMENT || process.env.RAILWAY_PROJECT_ID);
 const SS_SCRAPER_ENABLED = String(process.env.ENABLE_SS_SCRAPER || '').toLowerCase() === 'true';
@@ -383,6 +384,36 @@ function ownersData(viewer) {
 
 function savedOwnerIds() {
   return ownerIdsFromRows(ownersData({ role: 'admin', email: 'owners-inbox' }).rows);
+}
+
+function apartmentRegistryKey(source, apartmentId) {
+  return `${source === 'SS.ge' ? 'SS.ge' : 'MyHome'}:${clean(apartmentId)}`;
+}
+
+function rejectedApartmentRegistry() {
+  return readJsonFile(REJECTED_APARTMENTS_PATH);
+}
+
+function rememberRejectedApartment(item, source, viewer) {
+  const registry = rejectedApartmentRegistry();
+  const key = apartmentRegistryKey(source, item.apartment_id);
+  registry[key] = {
+    apartmentId: clean(item.apartment_id), source: source === 'SS.ge' ? 'SS.ge' : 'MyHome',
+    rejectedAt: item._reviewed_at || new Date().toISOString(), rejectedBy: viewer?.email || ''
+  };
+  fs.writeFileSync(REJECTED_APARTMENTS_PATH, JSON.stringify(registry, null, 2), 'utf8');
+}
+
+function permanentApartmentKeys(myHomeData = {}, ssData = {}) {
+  const keys = new Set(Object.keys(rejectedApartmentRegistry()));
+  for (const [source, data] of [['MyHome', myHomeData], ['SS.ge', ssData]]) {
+    for (const item of Object.values(data)) {
+      if (item._review_status === 'accepted' || item._review_status === 'rejected') {
+        keys.add(apartmentRegistryKey(source, item.apartment_id));
+      }
+    }
+  }
+  return keys;
 }
 
 function ownersDataForSubject(viewer, subject) {
@@ -873,6 +904,7 @@ async function reviewApartment(request, response, viewer, apartmentId) {
     item._reviewed_by = viewer.name || viewer.email;
     item._reviewed_by_email = viewer.email;
     item._reviewed_at = new Date().toISOString();
+    if (body.action === 'rejected') rememberRejectedApartment(item, data === ssData ? 'SS.ge' : 'MyHome', viewer);
     if (data === myHomeData) saveData(data);
     else saveData(data, SS_DATA_PATH, SS_CSV_PATH);
     response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
@@ -2168,7 +2200,9 @@ async function scan(context, data, state, options) {
     console.log(`Search configured for ${byId.size} current listings from ${options.searches.length} district(s), ${options.pages} page(s) each. Importing the complete result set.`);
   }
 
+  const permanentKeys = permanentApartmentKeys(data, liveSsData || loadSsData());
   const toImport = cards.filter(card => {
+    if (permanentKeys.has(apartmentRegistryKey('MyHome', card.id))) return false;
     const saved = data[card.id];
     return !saved || (saved._baseline && !saved._excluded && !saved.title);
   });
@@ -2280,6 +2314,7 @@ async function scan(context, data, state, options) {
 
 async function scanSs(context, data, state) {
   const cards = await requestSsCards(context);
+  const permanentKeys = permanentApartmentKeys(liveMyHomeData || loadData(), data);
   if (!state.ss_initialized || state.ss_engine_version !== 4) {
     for (const card of cards) {
       if (!data[card.id]) {
@@ -2301,7 +2336,7 @@ async function scanSs(context, data, state) {
   }
 
   const baselineTime = new Date(state.ss_initialized_at).getTime();
-  const unseen = cards.filter(card => !data[card.id]);
+  const unseen = cards.filter(card => !data[card.id] && !permanentKeys.has(apartmentRegistryKey('SS.ge', card.id)));
   const newest = unseen.filter(card => new Date(card.api.createDate).getTime() > baselineTime);
   const older = unseen.filter(card => new Date(card.api.createDate).getTime() <= baselineTime);
   for (const card of older) {
@@ -2378,6 +2413,11 @@ async function main() {
   liveMyHomeData = data;
   liveSsData = ssData;
   const state = loadState();
+  for (const [source, sourceData] of [['MyHome', data], ['SS.ge', ssData]]) {
+    for (const item of Object.values(sourceData)) {
+      if (item._review_status === 'rejected') rememberRejectedApartment(item, source, { email: item._reviewed_by_email });
+    }
+  }
   const restoredAccepted = restoreAccidentallyExcludedApartments(data) + restoreAccidentallyExcludedApartments(ssData);
   const excludedMyHome = markExcludedDescriptions(data);
   const excludedSs = markExcludedDescriptions(ssData);
