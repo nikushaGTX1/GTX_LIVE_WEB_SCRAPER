@@ -31,28 +31,23 @@ test('inactive and uploader accounts are omitted from assignment dropdowns', () 
   assert.match(source, /return assignableAgents\.map\(agent => `<option/);
 });
 
-test('pending apartments are persistently assigned in round-robin order', () => {
-  assert.match(source, /const agents = await getDistributionAgents\(\)/);
-  assert.match(source, /Number\(state\.api_assignment_index \|\| 0\) % agents\.length/);
-  assert.match(source, /item\.assigned_agent_id = agent\.id/);
-  assert.match(source, /state\.api_assignment_index = Number\(state\.api_assignment_index \|\| 0\) \+ 1/);
-  assert.match(source, /saveData\(data, dataPath, csvPath\);\s*saveState\(state\)/);
+test('automatic round-robin agent assignment has been removed', () => {
+  // Requested 2026-09-16: apartments must never be auto-assigned to agents;
+  // a manager assigns them by hand via the reassign dropdown instead.
+  assert.doesNotMatch(source, /function getDistributionAgents\(/);
+  assert.doesNotMatch(source, /function assignPendingApartments\(/);
+  assert.doesNotMatch(source, /function hydrateAssignedAgentNames\(/);
+  assert.doesNotMatch(source, /assigned in round-robin order/);
+  assert.doesNotMatch(source, /Round-robin assignment enabled/);
+  // api_assignment_index still appears once, inside the pre-existing
+  // intentionally-unreachable legacy publishing block (never executed) -
+  // confirm it's not live anywhere reachable code calls into.
+  assert.doesNotMatch(source, /await assignPendingApartments\(/);
+  assert.doesNotMatch(source, /await getDistributionAgents\(\)/);
+  assert.doesNotMatch(source, /await hydrateAssignedAgentNames\(/);
 });
 
-test('assignment refreshes active API agents and reassigns inactive pending queues', () => {
-  const distributionStart = source.indexOf('async function getDistributionAgents');
-  const distributionEnd = source.indexOf('async function hydrateAssignedAgentNames');
-  assert.doesNotMatch(source.slice(distributionStart, distributionEnd), /if \(websiteApiAgents\.length\) return websiteApiAgents/);
-  assert.match(source, /const activeAgentIds = new Set\(agents\.map\(agent => String\(agent\.id\)\)\)/);
-  assert.match(source, /activeAgentIds\.has\(assignedId\) \|\| !stillPending/);
-  assert.match(source, /delete item\.assigned_agent_id/);
-  assert.match(source, /item\._reassigned_from_inactive_at = item\._assigned_at/);
-  assert.match(source, /Skipping inactive or non-agent configured Website API IDs/);
-  assert.match(source, /available\.filter\(agent => !configuredAgentIds\.has\(agent\.id\)\)/);
-  assert.doesNotMatch(source, /Configured Website API agent IDs were not found/);
-});
-
-test('all active agents receive apartments while admin and manager roles are excluded', () => {
+test('only real agent accounts are eligible for manual reassignment, not admins or managers', () => {
   assert.match(source, /function isAssignableApiAgent\(agent\)/);
   assert.match(source, /if \(role\) return \/\(\^\|\[ _-\]\)agent/);
   assert.match(source, /\.filter\(agent => agent\.id && isAssignableApiAgent\(agent\)\)/);
@@ -60,10 +55,11 @@ test('all active agents receive apartments while admin and manager roles are exc
   assert.doesNotMatch(source, /AGENT_DISTRIBUTION_COUNT/);
 });
 
-test('Website API upload is attributed to the assigned agent', () => {
+test('the standalone Website API upload helper still attributes uploads to a given agent', () => {
+  // The round-robin distribution loop that used to call this was removed;
+  // the helper itself is kept for possible future per-agent publishing.
   assert.match(source, /async function uploadApartmentToWebsite\(item, agentId\)/);
   assert.match(source, /form\.set\('UploadedByUserId', agentId\)/);
-  assert.match(source, /uploadApartmentToWebsite\(item, agent\.id\)/);
 });
 
 test('agents only see and review their own assigned apartments', () => {

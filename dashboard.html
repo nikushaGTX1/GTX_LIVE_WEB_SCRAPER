@@ -80,7 +80,6 @@
         </div>
         <p id="status-error" class="status-error" hidden></p>
       </div>
-      <p id="assignment-status" class="assignment-status"></p>
       <div id="active-searches" class="active-searches"></div>
     </section>
 
@@ -206,12 +205,6 @@
         item.hidden = ownersView || managementNav.dataset.currentView !== 'accepted';
       });
       document.getElementById('import-word-apartments').hidden = !config.canAdmin || managementNav.dataset.currentView !== 'all';
-      const assignment = document.getElementById('assignment-status');
-      assignment.textContent = config.assignment?.enabled
-        ? `Round-robin assignment enabled · ${config.assignment.pending} pending agent assignments`
-        : 'Website API assignment disabled — configure WEBSITE_API_EMAIL and WEBSITE_API_PASSWORD';
-      if (config.assignment?.lastError) assignment.textContent += ` · Error: ${config.assignment.lastError}`;
-      assignment.classList.toggle('warning', !config.assignment?.enabled || config.assignment.pending > 0);
       toggle.textContent = config.enabled ? 'Stop scraper' : 'Start scraper';
       toggle.classList.toggle('running', config.enabled);
       document.getElementById('refresh-status').textContent = ownersView || teamView
