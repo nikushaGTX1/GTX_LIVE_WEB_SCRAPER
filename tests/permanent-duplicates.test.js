@@ -26,7 +26,7 @@ test('only the × button writes the persistent exclusion registry', () => {
   assert.match(source, /fs\.writeFileSync\(REJECTED_APARTMENTS_PATH/);
   // The registry is keyed by the listing's stable source ID, never by title,
   // address or price.
-  assert.match(source, /function apartmentRegistryKey\(source, apartmentId\) \{\n\s+return `\$\{source === 'SS\.ge' \? 'SS\.ge' : 'MyHome'\}:\$\{clean\(apartmentId\)\}`/);
+  assert.match(source, /function apartmentRegistryKey\(source, apartmentId\) \{\r?\n\s+return `\$\{source === 'SS\.ge' \? 'SS\.ge' : 'MyHome'\}:\$\{clean\(apartmentId\)\}`/);
   assert.equal(source.match(/fs\.writeFileSync\(REJECTED_APARTMENTS_PATH/g).length, 1);
 });
 
