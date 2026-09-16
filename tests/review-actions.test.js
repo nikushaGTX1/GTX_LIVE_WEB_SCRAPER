@@ -21,3 +21,9 @@ test('review requests identify the listing source', () => {
   assert.match(server, /requestedSource === 'ss\.ge'/);
   assert.match(server, /requestedSource === 'myhome'/);
 });
+
+test('ready for upload is sorted by the latest approval time', () => {
+  assert.match(server, /if \(view === 'accepted'\) \{\s*combined\.sort\(\(a, b\) => String\(b\._reviewed_at \|\| ''\)\.localeCompare\(String\(a\._reviewed_at \|\| ''\)\)\);/);
+  assert.match(server, /const displayedAt = view === 'accepted' \? item\._reviewed_at : item\.first_seen/);
+  assert.match(server, /view === 'accepted' \? 'Approved' : 'Received'/);
+});

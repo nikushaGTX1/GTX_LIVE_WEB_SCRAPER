@@ -565,6 +565,9 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
   } else {
     combined = combined.filter(item => item._review_status !== 'accepted');
   }
+  if (view === 'accepted') {
+    combined.sort((a, b) => String(b._reviewed_at || '').localeCompare(String(a._reviewed_at || '')));
+  }
   if (selectedAgentId && ['admin', 'manager'].includes(viewer?.role)) {
     combined = combined.filter(item => String(item.assigned_agent_id || '') === String(selectedAgentId));
   }
@@ -581,6 +584,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
   };
 
   const rows = combined.map(item => {
+    const displayedAt = view === 'accepted' ? item._reviewed_at : item.first_seen;
     const websiteStatus = item._api_uploaded
       ? `<span class="website-upload uploaded">Uploaded${item._website_api_apartment_id ? ` #${html(item._website_api_apartment_id)}` : ''}</span>`
       : item._api_error
@@ -597,7 +601,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
       </td>
       <td><span class="source ${item.source === 'SS.ge' ? 'ss' : ''}">${html(item.source)}</span></td>
       <td>${html(item.apartment_id)}</td>
-      <td title="${html(item.first_seen || '')}">${html(dashboardDateTime(item.first_seen))}</td>
+      <td title="${html(displayedAt || '')}">${html(dashboardDateTime(displayedAt))}</td>
       <td>${html(item.district || 'Other')}</td>
       <td>${canReassign ? `<select class="agent-reassign" aria-label="Reassign apartment ${html(item.apartment_id)}"><option value="">Unassigned</option>${assignmentOptions(item)}</select>` : html(item.assigned_agent_name || item.assigned_agent_id || 'Pending')}</td>
       <td>${html(item.rooms || '—')}</td>
@@ -640,7 +644,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
     <a href="/?view=${view === 'accepted' ? 'accepted' : 'all'}">Show everyone</a>
   </div>` : '';
   const content = view === 'owners' ? buildOwnersContent(viewer, selectedOwner || viewer) : view === 'team' ? buildTeamContent(allVisible, assignableAgents) : combined.length
-    ? `${profileBanner}${acceptedSearch}<table class="results-table"><thead><tr>${canSelectTransfer ? '<th class="transfer-select-heading"><input id="select-all-apartments" type="checkbox" aria-label="Select all visible apartments"></th>' : ''}<th class="review-heading">Review</th><th>Source</th><th>ID</th><th>Received</th><th>District</th><th>Assigned agent</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th><th>Website</th>${showManagementComments ? '<th>Accepted by</th><th>Comment</th>' : ''}</tr></thead><tbody>${rows}</tbody></table>`
+    ? `${profileBanner}${acceptedSearch}<table class="results-table"><thead><tr>${canSelectTransfer ? '<th class="transfer-select-heading"><input id="select-all-apartments" type="checkbox" aria-label="Select all visible apartments"></th>' : ''}<th class="review-heading">Review</th><th>Source</th><th>ID</th><th>${view === 'accepted' ? 'Approved' : 'Received'}</th><th>District</th><th>Assigned agent</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th><th>Website</th>${showManagementComments ? '<th>Accepted by</th><th>Comment</th>' : ''}</tr></thead><tbody>${rows}</tbody></table>`
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
     .replace('{{LISTING_COUNT}}', String(view === 'owners' ? ownersDataForSubject(viewer, selectedOwner || viewer).rows.length : view === 'team' ? assignableAgents.length : combined.length))
