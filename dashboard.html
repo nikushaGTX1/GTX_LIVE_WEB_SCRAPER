@@ -80,7 +80,6 @@
         </div>
         <p id="status-error" class="status-error" hidden></p>
       </div>
-      <div id="active-searches" class="active-searches"></div>
     </section>
 
     <nav class="district-filters" aria-label="Filter apartments by district">
@@ -212,25 +211,6 @@
         : (config.enabled ? 'Auto-refreshes every 3 seconds' : 'Dashboard refresh paused');
       document.getElementById('watcher-pages').value = config.pages;
       document.getElementById('watcher-interval').value = config.interval;
-      const searchList = document.getElementById('active-searches');
-      searchList.replaceChildren(...config.searches.map(search => {
-        const badge = document.createElement('span');
-        const label = document.createElement('span');
-        label.textContent = search.district;
-        const remove = document.createElement('button');
-        remove.type = 'button';
-        remove.className = 'remove-search';
-        remove.setAttribute('aria-label', `Remove ${search.district} search`);
-        remove.title = 'Remove this search link';
-        remove.textContent = '×';
-        remove.addEventListener('click', () => {
-          if (!confirm(`Remove the ${search.district} MyHome search?`)) return;
-          saveWatcherConfig({ removeUrl: search.url })
-            .catch(error => { message.textContent = error.message; });
-        });
-        badge.append(label, remove);
-        return badge;
-      }));
       const canonicalUrl = value => {
         const url = new URL(value);
         url.hash = '';
