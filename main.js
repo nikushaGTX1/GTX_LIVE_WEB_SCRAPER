@@ -1451,6 +1451,26 @@ function districtNameFromUrl(value) {
   return names[slug] || slug.split('-').map(part => part.charAt(0).toUpperCase() + part.slice(1)).join(' ');
 }
 
+// MyHome search URLs can group several "urbans" (neighborhoods) under one
+// link (e.g. a whole side of the city), so every listing must not be tagged
+// with the single label typed in for the search itself - that mislabels
+// everything from a multi-area link as one place. Each card's own
+// urban_name from the API is the actual neighborhood; map the handful with
+// an existing English quick-filter label back to it so those filters keep
+// working, otherwise use the real (Georgian) neighborhood name as-is.
+const KNOWN_DISTRICT_NAMES = {
+  'საბურთალო': 'Saburtalo',
+  'ვაკე': 'Vake',
+  'დიდი დიღომი': 'Didi Dighomi',
+  'დიღომი': 'Digomi'
+};
+
+function districtNameFromApiCard(item, fallback) {
+  const urbanName = clean(item?.urban_name);
+  if (!urbanName) return fallback;
+  return KNOWN_DISTRICT_NAMES[urbanName] || urbanName;
+}
+
 function validateMyHomeUrl(value) {
   const url = new URL(value);
   if (!/(^|\.)myhome\.ge$/i.test(url.hostname)) throw new Error('Only myhome.ge search URLs are allowed');
@@ -1514,7 +1534,7 @@ async function collectApiCards(searchUrl, pageCount, district = 'Unknown') {
       const slug = item.dynamic_slug || item.href_lang?.ka || item.middle_slug || 'gancxadeba';
       byId.set(id, {
         id,
-        district,
+        district: districtNameFromApiCard(item, district),
         url: `https://www.myhome.ge/udzravi-qoneba/${slug}-${id}/`,
         text: `${item.dynamic_title || ''} ${item.last_updated || ''}`,
         api: item
