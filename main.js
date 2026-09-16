@@ -1221,6 +1221,7 @@ function startWebServer() {
         }
         if (!imported) throw new Error('No usable MyHome links were found in the Word document');
         saveData(data);
+        await assignPendingApartments(data, loadState());
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify({ ok: true, imported, restored, excluded, duplicates, detailErrors }));
       } catch (error) {
@@ -1973,6 +1974,86 @@ function districtFromListingUrl(value) {
   return 'Other';
 }
 
+// Restored 2026-09-16: apartments must never sit Unassigned - every agent
+// gets a share of the pending queue in round-robin order. The status text
+// that used to announce this in the admin panel is intentionally not shown.
+async function getDistributionAgents() {
+  if (!websiteApiToken && !await loginWebsiteApi()) return [];
+  const payload = await websiteApiRequest('/api/Agents');
+  const available = responseItems(payload)
+    .map(agent => ({ ...agent, id: String(agent.userId ?? agent.user_id ?? agent.user?.id ?? agent.id ?? '') }))
+    .filter(agent => agent.id && isAssignableApiAgent(agent))
+    .sort((a, b) => a.id.localeCompare(b.id));
+  websiteDirectoryAgents = available;
+  const configuredIds = String(process.env.WEBSITE_API_AGENT_IDS || '')
+    .split(',').map(value => value.trim()).filter(Boolean);
+  const configuredAgents = configuredIds.map(id => available.find(agent => agent.id === id)).filter(Boolean);
+  const configuredAgentIds = new Set(configuredAgents.map(agent => agent.id));
+  websiteApiAgents = configuredIds.length
+    ? [...configuredAgents, ...available.filter(agent => !configuredAgentIds.has(agent.id))]
+    : available;
+  if (configuredIds.length && configuredAgents.length !== configuredIds.length) {
+    const found = new Set(configuredAgents.map(agent => agent.id));
+    const missing = configuredIds.filter(id => !found.has(id));
+    console.warn(`Skipping inactive or non-agent configured Website API IDs: ${missing.join(', ')}`);
+  }
+  if (!websiteApiAgents.length) throw new Error('Automatic assignment could not resolve any agents');
+  return websiteApiAgents;
+}
+
+async function hydrateAssignedAgentNames(data) {
+  if (!process.env.WEBSITE_API_EMAIL || !process.env.WEBSITE_API_PASSWORD) return 0;
+  const agents = await getDistributionAgents();
+  const names = new Map(agents.map(agent => [agent.id, agentDisplayName(agent)]));
+  let updated = 0;
+  for (const item of Object.values(data)) {
+    const name = names.get(String(item.assigned_agent_id || ''));
+    if (name && item.assigned_agent_name !== name) {
+      item.assigned_agent_name = name;
+      updated += 1;
+    }
+  }
+  return updated;
+}
+
+async function assignPendingApartments(data, state, dataPath = DATA_PATH, csvPath = CSV_PATH) {
+  if (!process.env.WEBSITE_API_EMAIL || !process.env.WEBSITE_API_PASSWORD) return 0;
+  const agents = await getDistributionAgents();
+  const activeAgentIds = new Set(agents.map(agent => String(agent.id)));
+  let released = 0;
+  for (const item of Object.values(data)) {
+    const assignedId = String(item.assigned_agent_id || '');
+    const stillPending = !item._baseline && !item._excluded && !['accepted', 'rejected'].includes(item._review_status) &&
+      !item._api_uploaded && !(item._listing_uploads || []).length;
+    if (!assignedId || activeAgentIds.has(assignedId) || !stillPending) continue;
+    item._previous_inactive_agent_id = assignedId;
+    item._previous_inactive_agent_name = item.assigned_agent_name || '';
+    delete item.assigned_agent_id;
+    delete item.assigned_agent_name;
+    released += 1;
+  }
+  const pending = Object.values(data)
+    .filter(item => !item._baseline && !item._excluded && !item.assigned_agent_id && !hasExcludedDescription(item.description))
+    .sort((a, b) => String(a.first_seen).localeCompare(String(b.first_seen)));
+  if (!pending.length) {
+    if (released) saveData(data, dataPath, csvPath);
+    return 0;
+  }
+  for (const item of pending) {
+    const index = Number(state.api_assignment_index || 0) % agents.length;
+    const agent = agents[index];
+    item.assigned_agent_id = agent.id;
+    item.assigned_agent_name = agentDisplayName(agent);
+    item._assigned_at = new Date().toISOString();
+    if (item._previous_inactive_agent_id) item._reassigned_from_inactive_at = item._assigned_at;
+    delete item._assignment_error;
+    state.api_assignment_index = Number(state.api_assignment_index || 0) + 1;
+  }
+  saveData(data, dataPath, csvPath);
+  saveState(state);
+  return pending.length;
+}
+
 async function hydrateListingUploadHistory() {
   if (!process.env.WEBSITE_API_EMAIL || !process.env.WEBSITE_API_PASSWORD) return;
   if (Date.now() - dashboardUploadsRefreshedAt < 30_000) return;
@@ -2093,16 +2174,13 @@ async function uploadApartmentToWebsite(item, agentId) {
   return websiteApiRequest('/api/Apartments', { method: 'POST', body: form });
 }
 
-async function syncPendingWebsiteApartments() {
+async function syncPendingWebsiteApartments(data, state, onlyApartmentId = null, dataPath = DATA_PATH, csvPath = CSV_PATH) {
   // Scraped listings belong only to this scraper's private dataset. They must
   // never be published into Velven's customer-facing Apartments collection.
-  // Automatic round-robin agent assignment was removed (2026-09-16): new
-  // apartments are left unassigned until a manager assigns them by hand from
-  // the dashboard's reassign dropdown. uploadApartmentToWebsite is kept as a
-  // standalone helper (used nowhere right now) in case per-agent publishing
-  // is wired back up later; the round-robin distribution loop that used to
-  // call it here has been removed along with getDistributionAgents.
-  return 0;
+  // Agent assignment is local and remains valid independently of publishing.
+  // uploadApartmentToWebsite is kept as a standalone helper (used nowhere
+  // right now) in case per-agent publishing is wired back up later.
+  return assignPendingApartments(data, state, dataPath, csvPath);
 }
 
 async function extractSsDetail(page, card) {
@@ -2420,6 +2498,15 @@ async function main() {
   const ssFilters = refreshFilterExclusions(ssData, blockedOwners);
   const clearedStreetErrors = clearLegacyStreetUploadErrors(data) + clearLegacyStreetUploadErrors(ssData);
   const clearedStreetData = clearLegacyStreetData(data) + clearLegacyStreetData(ssData);
+  try {
+    const named = await hydrateAssignedAgentNames(data) + await hydrateAssignedAgentNames(ssData);
+    if (named) console.log(`Resolved display names for ${named} assigned apartment(s).`);
+    const assigned = await assignPendingApartments(data, state) +
+      await assignPendingApartments(ssData, state, SS_DATA_PATH, SS_CSV_PATH);
+    if (assigned) console.log(`Assigned ${assigned} pending apartment(s) to agents.`);
+  } catch (error) {
+    console.error(`Could not resolve or assign apartment agents: ${error.message}`);
+  }
   saveData(data);
   saveData(ssData, SS_DATA_PATH, SS_CSV_PATH);
   if (clearedStreetErrors) console.log(`Cleared ${clearedStreetErrors} obsolete street-resolution upload error(s); those apartments will retry without streets.`);
