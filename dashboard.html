@@ -710,21 +710,13 @@
           return;
         }
         if (event.target.closest('.accept-button')) {
-          const button = event.target.closest('.accept-button');
-          button.disabled = true;
-          button.setAttribute('aria-busy', 'true');
-          await saveReview(row, 'accepted');
-          row.classList.add('review-accepting');
-          setTimeout(() => {
-            commentRow?.remove();
-            row.remove();
-            const count = document.getElementById('listing-count');
-            const currentCount = Number(count?.textContent) || 0;
-            if (count) count.textContent = String(Math.max(0, currentCount - 1));
-            if (!document.querySelector('tr.apartment-row')) {
-              document.getElementById('dashboard-content').innerHTML = '<div class="empty">No apartments waiting for review.</div>';
-            }
-          }, 300);
+          if (!commentRow) return;
+          document.querySelectorAll('tbody tr.comment-row').forEach(candidate => {
+            if (candidate !== commentRow) candidate.hidden = true;
+          });
+          commentRow.hidden = false;
+          commentRow.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+          commentRow.querySelector('.review-comment').focus({ preventScroll: true });
           return;
         }
         if (event.target.closest('.cancel-comment')) {

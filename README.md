@@ -43,16 +43,17 @@ dashboard owner as `Pending`; the same agent is retained while the API upload
 retries. Street resolution is intentionally not used. New scraped apartments are sent directly to `/api/Apartments`; street IDs are not required by this watcher.
 
 Agents can review their assigned rows with a green checkmark or red ×. The green
-checkmark immediately moves an apartment to Ready For Upload. Rejecting
-plays a red removal animation and persistently hides the apartment. Accepting
-plays a green animation and stores the reviewing account and time. Managers can
-add or update the apartment comment from Ready For Upload. The server prevents
-agents from reviewing another agent's apartment; admins may review any row.
+checkmark opens a required comment field directly below the apartment; clicking
+`Save comment & move` then moves it to Ready For Upload. Rejecting plays a red
+removal animation and persistently hides the apartment. Accepting stores the
+comment, reviewing account, and approval time. Managers can update the comment
+from Ready For Upload. The server prevents agents from reviewing another agent's
+apartment; admins may review any row.
 District filtering never opens comment rows, and the results table wraps long IDs
 instead of forcing a horizontal scrollbar.
 
 Admins and managers have an `Accepted apartments` management view at
-`/?view=accepted`. Clicking ✓ immediately marks the apartment accepted. The Accepted apartments view is a strict accepted-only subset, while All apartments continues to show every non-rejected scraped apartment. The queue includes accepted apartments across every agent plus the saved
+`/?view=accepted`. Clicking ✓ opens the required comment step; saving it marks the apartment accepted. The Accepted apartments view is a strict accepted-only subset, while All apartments continues to show every non-rejected scraped apartment. The queue includes accepted apartments across every agent plus the saved
 comment, reviewer email, and review time. Managers are restricted to this accepted
 queue; admins can switch between all and accepted views.
 The management navigation includes separate copy buttons for apartments received

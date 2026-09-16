@@ -8,12 +8,14 @@ const path = require('node:path');
 const dashboard = fs.readFileSync(path.join(__dirname, '..', 'dashboard.html'), 'utf8');
 const server = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 
-test('the checkmark immediately persists acceptance', () => {
+test('the checkmark opens a required comment before acceptance', () => {
   const acceptStart = dashboard.indexOf("if (event.target.closest('.accept-button'))");
   const acceptEnd = dashboard.indexOf("if (event.target.closest('.cancel-comment'))", acceptStart);
   const handler = dashboard.slice(acceptStart, acceptEnd);
-  assert.match(handler, /await saveReview\(row, 'accepted'\)/);
-  assert.doesNotMatch(handler, /commentRow\.hidden = false/);
+  assert.match(handler, /commentRow\.hidden = false/);
+  assert.doesNotMatch(handler, /saveReview\(row, 'accepted'\)/);
+  assert.match(dashboard, /Please add a comment before moving this apartment to Ready For Upload/);
+  assert.match(dashboard, /await saveReview\(row, 'accepted', comment\)/);
 });
 
 test('review requests identify the listing source', () => {
