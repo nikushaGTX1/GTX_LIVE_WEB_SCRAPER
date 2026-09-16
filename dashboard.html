@@ -62,10 +62,11 @@
         <label>Every (seconds)
           <input id="watcher-interval" type="number" min="3" max="3600" value="3" required>
         </label>
-        <button class="save-button" type="submit">Add search &amp; save</button>
+        <button class="save-button" type="submit">Scrape this link only</button>
       </form>
+      <p class="control-message">Sending a link replaces any previously configured search — the scraper only watches this one link at a time.</p>
       <div class="preset-section">
-        <span>Quick district toggles</span>
+        <span>Quick district toggles (replaces the current search)</span>
         <div id="search-presets" class="search-presets"></div>
       </div>
       <p id="watcher-message" class="control-message" aria-live="polite"></p>

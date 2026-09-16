@@ -838,10 +838,10 @@ async function updateWatcherConfig(request, response) {
     if (body.url) {
       const url = validateMyHomeUrl(body.url);
       const district = clean(body.district) || districtNameFromUrl(url);
-      const canonical = searchKey(url, watcherRuntime.pages).split('|pages=')[0];
-      const existing = watcherRuntime.searches.find(search => searchKey(search.url, watcherRuntime.pages).split('|pages=')[0] === canonical);
-      if (existing) Object.assign(existing, { district, url });
-      else watcherRuntime.searches.push({ district, url });
+      // Single-search mode: whatever link is sent becomes the only thing the
+      // scraper watches, replacing any previously configured search(es)
+      // instead of accumulating a growing list of districts.
+      watcherRuntime.searches = [{ district, url }];
     }
     if (body.removeUrl) {
       const removeUrl = validateMyHomeUrl(body.removeUrl);
