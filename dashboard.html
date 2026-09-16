@@ -597,7 +597,7 @@
       const response = await fetch(`/api/apartments/${row.dataset.apartmentId}/review`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ action, comment, ...extra })
+        body: JSON.stringify({ action, comment, source: row.dataset.apartmentSource, ...extra })
       });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Could not save apartment review');
@@ -677,9 +677,8 @@
     document.getElementById('dashboard-content').addEventListener('click', async event => {
       const clickedRow = event.target.closest('tr[data-apartment-id]');
       if (!clickedRow) return;
-      const apartmentId = clickedRow.dataset.apartmentId;
-      const row = document.querySelector(`tr.apartment-row[data-apartment-id="${apartmentId}"]`);
-      const commentRow = document.querySelector(`tr.comment-row[data-comment-for="${apartmentId}"]`);
+      const row = clickedRow.matches('.apartment-row') ? clickedRow : clickedRow.previousElementSibling;
+      const commentRow = row?.nextElementSibling?.matches('.comment-row') ? row.nextElementSibling : null;
       if (!row) return;
       reviewInteractionUntil = Date.now() + 10000;
       try {
@@ -711,12 +710,21 @@
           return;
         }
         if (event.target.closest('.accept-button')) {
-          if (!commentRow) return;
-          document.querySelectorAll('tbody tr.comment-row').forEach(candidate => {
-            if (candidate !== commentRow) candidate.hidden = true;
-          });
-          commentRow.hidden = false;
-          commentRow.querySelector('.review-comment').focus();
+          const button = event.target.closest('.accept-button');
+          button.disabled = true;
+          button.setAttribute('aria-busy', 'true');
+          await saveReview(row, 'accepted');
+          row.classList.add('review-accepting');
+          setTimeout(() => {
+            commentRow?.remove();
+            row.remove();
+            const count = document.getElementById('listing-count');
+            const currentCount = Number(count?.textContent) || 0;
+            if (count) count.textContent = String(Math.max(0, currentCount - 1));
+            if (!document.querySelector('tr.apartment-row')) {
+              document.getElementById('dashboard-content').innerHTML = '<div class="empty">No apartments waiting for review.</div>';
+            }
+          }, 300);
           return;
         }
         if (event.target.closest('.cancel-comment')) {

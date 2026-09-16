@@ -868,7 +868,13 @@ async function reviewApartment(request, response, viewer, apartmentId) {
     const comment = clean(body.comment || '').slice(0, 2000);
     const myHomeData = liveMyHomeData || loadData();
     const ssData = liveSsData || loadSsData();
-    const data = myHomeData[apartmentId] ? myHomeData : ssData;
+    const requestedSource = clean(body.source).toLowerCase();
+    if (requestedSource && !['myhome', 'ss.ge'].includes(requestedSource)) throw new Error('Invalid apartment source');
+    const data = requestedSource === 'ss.ge'
+      ? ssData
+      : requestedSource === 'myhome'
+        ? myHomeData
+        : myHomeData[apartmentId] ? myHomeData : ssData;
     const item = data[apartmentId];
     if (!item) {
       response.writeHead(404, { 'content-type': 'application/json; charset=utf-8' });

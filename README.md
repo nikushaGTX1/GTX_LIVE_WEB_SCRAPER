@@ -42,14 +42,12 @@ round-robin order. A street-catalog or network error therefore does not leave th
 dashboard owner as `Pending`; the same agent is retained while the API upload
 retries. Street resolution is intentionally not used. New scraped apartments are sent directly to `/api/Apartments`; street IDs are not required by this watcher.
 
-Agents can review their assigned rows with a green checkmark or red ×. Rejecting
+Agents can review their assigned rows with a green checkmark or red ×. The green
+checkmark immediately moves an apartment to Ready For Upload. Rejecting
 plays a red removal animation and persistently hides the apartment. Accepting
-plays a green animation, opens a comment editor, and stores the comment plus the
-reviewing account and time. The editor spans a separate row directly below the
-apartment rather than expanding in the right-side action cell. It stays collapsed
-on page load—even when a saved comment exists—and opens only when the green
-checkmark beside the red × is clicked. The server prevents agents from reviewing another
-agent's apartment; admins may review any row.
+plays a green animation and stores the reviewing account and time. Managers can
+add or update the apartment comment from Ready For Upload. The server prevents
+agents from reviewing another agent's apartment; admins may review any row.
 District filtering never opens comment rows, and the results table wraps long IDs
 instead of forcing a horizontal scrollbar.
 
