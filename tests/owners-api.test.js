@@ -29,6 +29,14 @@ test('extension owner uploads feed the authenticated agent and central Administr
   assert.match(source, /data\.rows = mergeOwnerRows\(data\.rows, normalizedOwnersData\(readJsonFile\(agentPath\)\)\.rows\)/);
 });
 
+test('owner aggregation preserves id-less rows and refines broad districts without deleting saved data', () => {
+  assert.match(source, /const rowKeys = new Set\(/);
+  assert.match(source, /if \(!ownerId\) \{[\s\S]*if \(!rowKeys\.has\(rowKey\)\)[\s\S]*merged\.push\(incoming\)/);
+  assert.match(source, /broadDistricts\.has\(existingDistrict\) && !broadDistricts\.has\(incomingDistrict\)/);
+  assert.match(source, /merged\[existingIndex\]\[2\] = incomingDistrict/);
+  assert.doesNotMatch(source, /function mergeOwnerRows[\s\S]*?merged\.splice/);
+});
+
 test('managers share the complete owner database and team profiles link to each agent owners', () => {
   assert.match(source, /\['admin', 'manager'\]\.includes\(viewer\?\.role\)\) return ADMIN_OWNERS_PATH/);
   assert.match(source, /view=owners&agent=\$\{encodeURIComponent\(agent\.id\)\}/);

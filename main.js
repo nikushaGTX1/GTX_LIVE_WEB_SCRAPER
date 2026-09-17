@@ -320,14 +320,36 @@ function normalizedOwnersData(saved) {
 function mergeOwnerRows(targetRows, sourceRows) {
   const merged = targetRows.map(row => [...row]);
   const indexes = new Map(merged.map((row, index) => [clean(row[0]), index]).filter(([ownerId]) => ownerId));
+  const rowKeys = new Set(merged.map(row => JSON.stringify(OWNER_HEADERS.map((_, index) => clean(row[index])))));
+  const broadDistricts = new Set(['ვაკე-საბურთალო', 'დიდუბე-ჩუღურეთი', 'ისანი-სამგორი', 'გლდანი-ნაძალადევი']);
   for (const source of sourceRows) {
     const incoming = OWNER_HEADERS.map((_, index) => clean(source[index]));
     const ownerId = incoming[0];
-    if (!ownerId) continue;
+    const rowKey = JSON.stringify(incoming);
+    // Some manually imported owner rows do not have an owner ID yet. Keep
+    // them by their complete row value, while preventing duplicates every
+    // time management opens the combined Owners view.
+    if (!ownerId) {
+      if (!rowKeys.has(rowKey)) {
+        rowKeys.add(rowKey);
+        merged.push(incoming);
+      }
+      continue;
+    }
     const existingIndex = indexes.get(ownerId);
     if (existingIndex == null) {
       indexes.set(ownerId, merged.length);
+      rowKeys.add(rowKey);
       merged.push(incoming);
+      continue;
+    }
+    // The central row can contain the broad search area while the agent row
+    // has the actual neighbourhood. Refine that value without replacing any
+    // other saved owner fields or ever removing the existing row.
+    const existingDistrict = clean(merged[existingIndex][2]);
+    const incomingDistrict = incoming[2];
+    if (incomingDistrict && (!existingDistrict || (broadDistricts.has(existingDistrict) && !broadDistricts.has(incomingDistrict)))) {
+      merged[existingIndex][2] = incomingDistrict;
     }
   }
   return merged;
