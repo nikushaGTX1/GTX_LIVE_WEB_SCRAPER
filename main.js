@@ -1076,7 +1076,7 @@ function startWebServer() {
       const targetDate = dateKeyDaysAgo(daysAgo);
       const seenListings = new Set();
       const accepted = [...Object.values(liveMyHomeData || {}), ...Object.values(liveSsData || {})]
-        .filter(item => item._review_status === 'accepted' && item.url && calendarDateKey(item.first_seen) === targetDate)
+        .filter(item => item._review_status === 'accepted' && item.url && calendarDateKey(item._reviewed_at) === targetDate)
         .filter(item => viewer.role !== 'agent' || String(item.assigned_agent_id || '') === String(viewer.agentId || ''))
         .filter(item => {
           const key = String(item.url).split(/[?#]/)[0].replace(/\/$/, '').toLowerCase() || `${item.source || ''}:${item.apartment_id}`;

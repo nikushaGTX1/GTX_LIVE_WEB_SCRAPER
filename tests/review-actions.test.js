@@ -29,3 +29,9 @@ test('ready for upload is sorted by the latest approval time', () => {
   assert.match(server, /const displayedAt = view === 'accepted' \? item\._reviewed_at : item\.first_seen/);
   assert.match(server, /view === 'accepted' \? 'Approved' : 'Received'/);
 });
+
+test('ready apartment copy buttons group links by approval date', () => {
+  assert.match(server, /calendarDateKey\(item\._reviewed_at\) === targetDate/);
+  assert.doesNotMatch(server, /calendarDateKey\(item\.first_seen\) === targetDate/);
+  assert.match(dashboard, /Copy ready apartment links by approval date/);
+});
