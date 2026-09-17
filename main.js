@@ -256,6 +256,7 @@ function readJsonFile(filePath) {
 }
 
 const OWNER_HEADERS = ['მესაკუთრის ID', 'მესაკუთრის ნომერი', 'უბანი', 'ოთახები და საძინებელი', 'კვადრატულობა', 'ფასი', 'ჩემი ID MYHOME', 'ჩემი ID SS.GE', 'კომენტარი/შეთანხმება'];
+const BROAD_OWNER_DISTRICTS = new Set(['ვაკე-საბურთალო', 'დიდუბე-ჩუღურეთი', 'ისანი-სამგორი', 'გლდანი-ნაძალადევი']);
 
 const DEFAULT_OWNERS = {
   headers: OWNER_HEADERS,
@@ -321,7 +322,6 @@ function mergeOwnerRows(targetRows, sourceRows) {
   const merged = targetRows.map(row => [...row]);
   const indexes = new Map(merged.map((row, index) => [clean(row[0]), index]).filter(([ownerId]) => ownerId));
   const rowKeys = new Set(merged.map(row => JSON.stringify(OWNER_HEADERS.map((_, index) => clean(row[index])))));
-  const broadDistricts = new Set(['ვაკე-საბურთალო', 'დიდუბე-ჩუღურეთი', 'ისანი-სამგორი', 'გლდანი-ნაძალადევი']);
   for (const source of sourceRows) {
     const incoming = OWNER_HEADERS.map((_, index) => clean(source[index]));
     const ownerId = incoming[0];
@@ -348,7 +348,7 @@ function mergeOwnerRows(targetRows, sourceRows) {
     // other saved owner fields or ever removing the existing row.
     const existingDistrict = clean(merged[existingIndex][2]);
     const incomingDistrict = incoming[2];
-    if (incomingDistrict && (!existingDistrict || (broadDistricts.has(existingDistrict) && !broadDistricts.has(incomingDistrict)))) {
+    if (incomingDistrict && (!existingDistrict || (BROAD_OWNER_DISTRICTS.has(existingDistrict) && !BROAD_OWNER_DISTRICTS.has(incomingDistrict)))) {
       merged[existingIndex][2] = incomingDistrict;
     }
   }
@@ -392,6 +392,32 @@ function applyAcceptedCommentsToOwners(data) {
   return changed;
 }
 
+function applySpecificDistrictsToOwners(data) {
+  const myHomeDistricts = new Map(Object.values(liveMyHomeData || loadData())
+    .map(item => [clean(item.apartment_id), clean(item.district)])
+    .filter(([listingId, district]) => listingId && district));
+  const ssDistricts = new Map(Object.values(liveSsData || loadSsData())
+    .map(item => [clean(item.apartment_id), clean(item.district)])
+    .filter(([listingId, district]) => listingId && district));
+  let changed = false;
+  for (const row of data.rows) {
+    const currentDistrict = clean(row[2]);
+    if (currentDistrict && !BROAD_OWNER_DISTRICTS.has(currentDistrict)) continue;
+    const candidates = [
+      myHomeDistricts.get(clean(row[0])),
+      ssDistricts.get(clean(row[0])),
+      myHomeDistricts.get(clean(row[6])),
+      ssDistricts.get(clean(row[7]))
+    ];
+    const specificDistrict = candidates.find(district => district && !BROAD_OWNER_DISTRICTS.has(district));
+    if (specificDistrict && specificDistrict !== currentDistrict) {
+      row[2] = specificDistrict;
+      changed = true;
+    }
+  }
+  return changed;
+}
+
 function ownersData(viewer) {
   const accountPath = ownersPathFor(viewer);
   let data = normalizedOwnersData(readJsonFile(accountPath));
@@ -404,6 +430,7 @@ function ownersData(viewer) {
   }
   const beforeComments = JSON.stringify(data);
   applyAcceptedCommentsToOwners(data);
+  applySpecificDistrictsToOwners(data);
   if (beforeComments !== JSON.stringify(data) || !fs.existsSync(accountPath) || ['admin', 'manager'].includes(viewer?.role)) {
     fs.writeFileSync(accountPath, JSON.stringify(data, null, 2), 'utf8');
   }

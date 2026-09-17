@@ -32,9 +32,20 @@ test('extension owner uploads feed the authenticated agent and central Administr
 test('owner aggregation preserves id-less rows and refines broad districts without deleting saved data', () => {
   assert.match(source, /const rowKeys = new Set\(/);
   assert.match(source, /if \(!ownerId\) \{[\s\S]*if \(!rowKeys\.has\(rowKey\)\)[\s\S]*merged\.push\(incoming\)/);
-  assert.match(source, /broadDistricts\.has\(existingDistrict\) && !broadDistricts\.has\(incomingDistrict\)/);
+  assert.match(source, /BROAD_OWNER_DISTRICTS\.has\(existingDistrict\) && !BROAD_OWNER_DISTRICTS\.has\(incomingDistrict\)/);
   assert.match(source, /merged\[existingIndex\]\[2\] = incomingDistrict/);
   assert.doesNotMatch(source, /function mergeOwnerRows[\s\S]*?merged\.splice/);
+});
+
+test('owner rows use a saved apartment neighbourhood instead of a combined administrative area', () => {
+  assert.match(source, /function applySpecificDistrictsToOwners\(data\)/);
+  assert.match(source, /myHomeDistricts\.get\(clean\(row\[0\]\)\)/);
+  assert.match(source, /ssDistricts\.get\(clean\(row\[0\]\)\)/);
+  assert.match(source, /myHomeDistricts\.get\(clean\(row\[6\]\)\)/);
+  assert.match(source, /ssDistricts\.get\(clean\(row\[7\]\)\)/);
+  assert.match(source, /if \(currentDistrict && !BROAD_OWNER_DISTRICTS\.has\(currentDistrict\)\) continue/);
+  assert.match(source, /row\[2\] = specificDistrict/);
+  assert.match(source, /applySpecificDistrictsToOwners\(data\)/);
 });
 
 test('managers share the complete owner database and team profiles link to each agent owners', () => {
