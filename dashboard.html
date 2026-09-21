@@ -130,6 +130,15 @@
       document.querySelector('.copy-accepted-group').hidden = true;
       document.getElementById('import-word-apartments').hidden = true;
     }
+    if (ownersView) {
+      // Every account can open the whole owner database (read-only).
+      const wholeOwnersOpen = new URLSearchParams(location.search).get('scope') === 'all';
+      const scopeLink = document.createElement('a');
+      scopeLink.className = 'owners-scope-link';
+      scopeLink.href = wholeOwnersOpen ? '/?view=owners' : '/?view=owners&scope=all';
+      scopeLink.textContent = wholeOwnersOpen ? 'Back to my owners' : 'See whole owner database';
+      document.querySelector('.header-meta').insertBefore(scopeLink, document.querySelector('.listing-count'));
+    }
     document.querySelectorAll('.copy-accepted-links').forEach(copyButton => copyButton.addEventListener('click', async event => {
       const button = event.currentTarget;
       const originalLabel = button.textContent;

@@ -255,7 +255,8 @@ function readJsonFile(filePath) {
   try { return JSON.parse(fs.readFileSync(filePath, 'utf8')); } catch { return {}; }
 }
 
-const OWNER_HEADERS = ['მესაკუთრის ID', 'მესაკუთრის ნომერი', 'უბანი', 'ოთახები და საძინებელი', 'კვადრატულობა', 'ფასი', 'ჩემი ID MYHOME', 'ჩემი ID SS.GE', 'კომენტარი/შეთანხმება'];
+const OWNER_HEADERS = ['მესაკუთრის ID', 'მესაკუთრის ნომერი', 'უბანი', 'ოთახები და საძინებელი', 'კვადრატულობა', 'ფასი', 'ჩემი ID MYHOME', 'ჩემი ID SS.GE', 'კომენტარი/შეთანხმება', 'დამატების თარიღი'];
+const OWNER_ADDED_COLUMN = OWNER_HEADERS.length - 1;
 const BROAD_OWNER_DISTRICTS = new Set(['ვაკე-საბურთალო', 'დიდუბე-ჩუღურეთი', 'ისანი-სამგორი', 'გლდანი-ნაძალადევი']);
 
 const DEFAULT_OWNERS = {
@@ -318,6 +319,19 @@ function normalizedOwnersData(saved) {
   return { headers: OWNER_HEADERS, rows };
 }
 
+// Newest first. Rows saved before the date column existed have no date and
+// keep their saved order below every dated row (sort is stable).
+function sortOwnersNewestFirst(rows) {
+  const time = row => {
+    const value = Date.parse(clean(row[OWNER_ADDED_COLUMN]));
+    return Number.isFinite(value) ? value : -Infinity;
+  };
+  return rows
+    .map((row, index) => ({ row, index, at: time(row) }))
+    .sort((left, right) => (right.at === left.at ? left.index - right.index : right.at > left.at ? 1 : -1))
+    .map(entry => entry.row);
+}
+
 function mergeOwnerRows(targetRows, sourceRows) {
   const merged = targetRows.map(row => [...row]);
   const indexes = new Map(merged.map((row, index) => [clean(row[0]), index]).filter(([ownerId]) => ownerId));
@@ -342,6 +356,9 @@ function mergeOwnerRows(targetRows, sourceRows) {
       rowKeys.add(rowKey);
       merged.push(incoming);
       continue;
+    }
+    if (!clean(merged[existingIndex][OWNER_ADDED_COLUMN]) && incoming[OWNER_ADDED_COLUMN]) {
+      merged[existingIndex][OWNER_ADDED_COLUMN] = incoming[OWNER_ADDED_COLUMN];
     }
     // The central row can contain the broad search area while the agent row
     // has the actual neighbourhood. Refine that value without replacing any
@@ -376,6 +393,7 @@ function upsertOwnerRow(viewer, incoming) {
   let rowIndex = ownerRowIndex(data.rows, incoming);
   const created = rowIndex < 0;
   if (created) {
+    incoming[OWNER_ADDED_COLUMN] = incoming[OWNER_ADDED_COLUMN] || new Date().toISOString();
     data.rows.unshift(incoming);
     rowIndex = 0;
   } else {
@@ -450,6 +468,7 @@ function ownersData(viewer) {
   if (beforeComments !== JSON.stringify(data) || !fs.existsSync(accountPath) || ['admin', 'manager'].includes(viewer?.role)) {
     fs.writeFileSync(accountPath, JSON.stringify(data, null, 2), 'utf8');
   }
+  data.rows = sortOwnersNewestFirst(data.rows);
   return data;
 }
 
@@ -538,12 +557,20 @@ function ownersDataForSubject(viewer, subject) {
   if (fs.existsSync(privatePath)) {
     rows = mergeOwnerRows(rows, normalizedOwnersData(readJsonFile(privatePath)).rows);
   }
-  return { headers: OWNER_HEADERS, rows };
+  return { headers: OWNER_HEADERS, rows: sortOwnersNewestFirst(rows) };
 }
 
-function buildOwnersContent(viewer, subject = viewer) {
-  const readOnly = ownersPathFor(subject) !== ownersPathFor(viewer);
-  const displayed = ownersDataForSubject(viewer, subject);
+// The central inbox holds every agent's owners. Anyone may open it read-only.
+const WHOLE_OWNERS_VIEWER = { role: 'admin', email: 'owners-inbox' };
+
+function ownerCellText(row, columnIndex) {
+  const value = row[columnIndex] ?? '';
+  return columnIndex === OWNER_ADDED_COLUMN && value ? dashboardDateTime(value) : value;
+}
+
+function buildOwnersContent(viewer, subject = viewer, whole = false) {
+  const readOnly = whole || ownersPathFor(subject) !== ownersPathFor(viewer);
+  const displayed = whole ? ownersData(WHOLE_OWNERS_VIEWER) : ownersDataForSubject(viewer, subject);
   const districts = [...new Set(displayed.rows.map(row => clean(row[2])).filter(Boolean))]
     .sort((left, right) => left.localeCompare(right, 'ka', { sensitivity: 'base' }));
   const head = `${displayed.headers.map((header, columnIndex) => {
@@ -551,11 +578,11 @@ function buildOwnersContent(viewer, subject = viewer) {
     if (columnIndex === 4 || columnIndex === 5) return `<th><button class="owner-filter-button" type="button" data-owner-sort="${columnIndex}" aria-pressed="false">${html(header)} <span aria-hidden="true">↓</span></button></th>`;
     return `<th>${html(header)}</th>`;
   }).join('')}${readOnly ? '' : '<th class="owner-actions-column">Actions</th>'}`;
-  const rows = displayed.rows.map((row, rowIndex) => `<tr data-owner-row="${rowIndex}">${displayed.headers.map((_, columnIndex) => `<td class="owner-cell"${readOnly ? '' : ' contenteditable="true"'} spellcheck="false" data-owner-index="${rowIndex}" data-owner-column="${columnIndex}">${html(row[columnIndex] ?? '')}</td>`).join('')}${readOnly ? '' : `<td class="owner-row-actions"><button class="owner-remove" type="button" data-owner-index="${rowIndex}" aria-label="Remove owner row">Remove</button></td>`}</tr>`).join('\n');
+  const rows = displayed.rows.map((row, rowIndex) => `<tr data-owner-row="${rowIndex}">${displayed.headers.map((_, columnIndex) => `<td class="owner-cell"${readOnly || columnIndex === OWNER_ADDED_COLUMN ? '' : ' contenteditable="true"'} spellcheck="false" data-owner-index="${rowIndex}" data-owner-column="${columnIndex}">${html(ownerCellText(row, columnIndex))}</td>`).join('')}${readOnly ? '' : `<td class="owner-row-actions"><button class="owner-remove" type="button" data-owner-index="${rowIndex}" aria-label="Remove owner row">Remove</button></td>`}</tr>`).join('\n');
   return `<section class="owners-panel" aria-labelledby="owners-title">
     <div class="owners-toolbar">
-      <div><p class="eyebrow">Owner database</p><h2 id="owners-title">${readOnly ? `${html(subject.name)}'s Owners` : 'Owners'}</h2><p id="owners-import-status">${displayed.rows.length} saved row(s)</p></div>
-      ${readOnly ? '<a href="/?view=team">Back to Team profiles</a>' : `<div class="owners-actions">
+      <div><p class="eyebrow">Owner database</p><h2 id="owners-title">${whole ? 'Whole owner database' : readOnly ? `${html(subject.name)}'s Owners` : 'Owners'}</h2><p id="owners-import-status">${displayed.rows.length} saved row(s)</p></div>
+      ${whole ? '<a href="/?view=owners">Back to my owners</a>' : readOnly ? '<a href="/?view=team">Back to Team profiles</a>' : `<div class="owners-actions">
         <input id="owners-file" type="file" accept=".xlsx,.xls,.csv" hidden>
         <button id="owners-add-row" type="button">Add row</button>
         <button id="owners-import" class="save-button" type="button">Import Excel</button>
@@ -617,7 +644,7 @@ function isListedApartment(item, blockedOwners) {
     !hasExcludedDescription(item.description) && !belongsToSavedOwner(item, blockedOwners);
 }
 
-function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
+function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', ownersScope = '') {
   const ownerIds = blockedOwnerIds();
   const allVisible = [
     ...Object.values(readJsonFile(DATA_PATH)).map(item => ({ ...item, source: item.source || 'MyHome' })),
@@ -718,11 +745,12 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
     ${canReassign && bulkTargets.length ? `<div class="bulk-transfer"><span id="transfer-selection-count">0 selected</span><label>Send selected to <select id="bulk-transfer-agent"><option value="">Choose agent…</option>${bulkTargets.map(agent => `<option value="${html(agent.id)}">${html(agent.name)}</option>`).join('')}</select></label><button id="bulk-transfer-button" type="button" data-from-agent="${html(selectedAgent.id)}" disabled>Transfer selected</button></div>` : ''}
     <a href="/?view=${view === 'accepted' ? 'accepted' : 'all'}">Show everyone</a>
   </div>` : '';
-  const content = view === 'owners' ? buildOwnersContent(viewer, selectedOwner || viewer) : view === 'team' ? buildTeamContent(allVisible, assignableAgents) : combined.length
+  const wholeOwners = view === 'owners' && ownersScope === 'all';
+  const content = view === 'owners' ? buildOwnersContent(viewer, selectedOwner || viewer, wholeOwners) : view === 'team' ? buildTeamContent(allVisible, assignableAgents) : combined.length
     ? `${profileBanner}${acceptedSearch}<table class="results-table"><thead><tr>${canSelectTransfer ? '<th class="transfer-select-heading"><input id="select-all-apartments" type="checkbox" aria-label="Select all visible apartments"></th>' : ''}<th class="review-heading">Review</th><th>Source</th><th>ID</th><th>${view === 'accepted' ? 'Approved' : 'Received'}</th><th>District</th><th>Assigned agent</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th><th>Website</th>${showManagementComments ? '<th>Accepted by</th><th>Comment</th>' : ''}</tr></thead><tbody>${rows}</tbody></table>`
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
-    .replace('{{LISTING_COUNT}}', String(view === 'owners' ? ownersDataForSubject(viewer, selectedOwner || viewer).rows.length : view === 'team' ? assignableAgents.length : combined.length))
+    .replace('{{LISTING_COUNT}}', String(view === 'owners' ? (wholeOwners ? ownersData(WHOLE_OWNERS_VIEWER) : ownersDataForSubject(viewer, selectedOwner || viewer)).rows.length : view === 'team' ? assignableAgents.length : combined.length))
     .replace('{{LOGGED_IN_AS}}', html(viewer?.name || viewer?.email || process.env.DASHBOARD_DISPLAY_USER || process.env.WEBSITE_API_EMAIL || 'Local viewer'))
     .replace('{{LOGGED_IN_ROLE}}', html(viewer?.role || 'admin'))
     .replace('{{CURRENT_VIEW}}', ['owners', 'accepted', 'team'].includes(view) ? view : 'all')
@@ -1345,10 +1373,12 @@ function startWebServer() {
         if (!Array.isArray(body.headers) || !body.headers.length || !Array.isArray(body.rows)) throw new Error('The worksheet is empty');
         if (body.headers.length > 100 || body.rows.length > 50_000) throw new Error('The worksheet is too large');
         const importedHeaders = body.headers.map(value => clean(value) || 'Column').slice(0, 100);
+        const importedAt = new Date().toISOString();
         const importedRows = body.rows.map(row => OWNER_HEADERS.map((header, columnIndex) => {
           const matchingIndex = importedHeaders.indexOf(header);
           const sourceIndex = matchingIndex >= 0 ? matchingIndex : columnIndex;
-          return clean(Array.isArray(row) ? row[sourceIndex] : '');
+          const cell = clean(Array.isArray(row) ? row[sourceIndex] : '');
+          return columnIndex === OWNER_ADDED_COLUMN && !cell ? importedAt : cell;
         }));
         let data = { headers: OWNER_HEADERS, rows: importedRows };
         if (body.append) {
@@ -1368,7 +1398,7 @@ function startWebServer() {
       try {
         const body = await readRequestJson(request);
         const data = ownersData(viewer);
-        if (body.addRow === true) data.rows.unshift(data.headers.map(() => ''));
+        if (body.addRow === true) data.rows.unshift(data.headers.map((_, index) => index === OWNER_ADDED_COLUMN ? new Date().toISOString() : ''));
         else {
           const rowIndex = Number(body.rowIndex);
           const columnIndex = Number(body.columnIndex);
@@ -1418,7 +1448,7 @@ function startWebServer() {
         new Promise(resolve=>setTimeout(resolve,4000))
       ]);
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store, max-age=0' });
-      response.end(buildDashboard(viewer, allowedView, clean(requestUrl.searchParams.get('agent'))));
+      response.end(buildDashboard(viewer, allowedView, clean(requestUrl.searchParams.get('agent')), clean(requestUrl.searchParams.get('scope'))));
       return;
     }
     const reviewMatch = pathname.match(/^\/api\/apartments\/(\d+)\/review$/);
