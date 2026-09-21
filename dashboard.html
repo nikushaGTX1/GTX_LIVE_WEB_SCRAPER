@@ -136,8 +136,15 @@
       const scopeLink = document.createElement('a');
       scopeLink.className = 'owners-scope-link';
       scopeLink.href = wholeOwnersOpen ? '/?view=owners' : '/?view=owners&scope=all';
-      scopeLink.textContent = wholeOwnersOpen ? 'Back to my owners' : 'See whole owner database';
-      document.querySelector('.header-meta').insertBefore(scopeLink, document.querySelector('.listing-count'));
+      const scopeIcon = document.createElement('span');
+      scopeIcon.className = 'owners-scope-icon';
+      scopeIcon.setAttribute('aria-hidden', 'true');
+      scopeIcon.textContent = wholeOwnersOpen ? '←' : '☰';
+      const scopeText = document.createElement('span');
+      scopeText.textContent = wholeOwnersOpen ? 'Back to my owners' : 'See whole owner database';
+      scopeLink.append(scopeIcon, scopeText);
+      // Same row as the account and count cards, after the count.
+      document.querySelector('.listing-count').insertAdjacentElement('afterend', scopeLink);
     }
     document.querySelectorAll('.copy-accepted-links').forEach(copyButton => copyButton.addEventListener('click', async event => {
       const button = event.currentTarget;

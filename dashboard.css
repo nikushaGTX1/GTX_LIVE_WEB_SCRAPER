@@ -538,16 +538,37 @@ a:hover { text-decoration: underline; }
 .website-upload.error { background:#fff0e4; color:#a84a00; }
 
 .owners-scope-link {
-  align-self: center;
-  padding: 10px 14px;
-  border: 1px solid var(--line, #d9e3ef);
-  border-radius: 12px;
-  background: #fff;
-  color: #0b5fd9;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  color: var(--primary);
   font-size: 13px;
   font-weight: 700;
   text-decoration: none;
   white-space: nowrap;
+  transition: transform .15s ease, border-color .15s ease, box-shadow .15s ease;
 }
 
-.owners-scope-link:hover { background: #eef4ff; }
+.owners-scope-icon {
+  display: grid;
+  width: 30px;
+  height: 30px;
+  place-items: center;
+  border-radius: 9px;
+  background: #e8f2ff;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.owners-scope-link:hover { transform: translateY(-1px); border-color: var(--primary); }
+.owners-scope-link:hover .owners-scope-icon { background: var(--primary); color: #fff; }
+.owners-scope-link:focus-visible { outline: 3px solid rgb(8 102 217 / 25%); outline-offset: 2px; }
+
+@media (max-width: 640px) {
+  .owners-scope-link { justify-content: center; }
+}
