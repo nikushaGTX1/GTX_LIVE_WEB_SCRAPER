@@ -15,7 +15,7 @@ test('dashboard API accepts Website API bearer tokens', () => {
 
 test('Owners endpoint merges later platform IDs into the same owner row', () => {
   assert.match(source, /pathname === '\/api\/owners\/upsert' && request\.method === 'POST'/);
-  assert.match(source, /data\.rows\.findIndex\(row => clean\(row\[0\]\) === incoming\[0\]\)/);
+  assert.match(source, /if \(incoming\[0\]\) return clean\(row\[0\]\) === incoming\[0\]/);
   assert.match(source, /seenOwnerIds\.has\(ownerId\)/);
   assert.match(source, /incoming\[columnIndex\] \|\| clean\(data\.rows\[rowIndex\]\[columnIndex\]\)/);
 });

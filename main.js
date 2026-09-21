@@ -355,9 +355,25 @@ function mergeOwnerRows(targetRows, sourceRows) {
   return merged;
 }
 
+// Owner identity for upserts: the owner ID when the sync supplied one, else
+// the phone, else the listing IDs. A row with none of these cannot be matched.
+function digitsOnly(value) {
+  // Last 9 digits: same number with or without the +995 prefix.
+  return String(value ?? '').replace(/\D/g, '').slice(-9);
+}
+
+function ownerRowIndex(rows, incoming) {
+  const phone = digitsOnly(incoming[1]);
+  return rows.findIndex(row => {
+    if (incoming[0]) return clean(row[0]) === incoming[0];
+    if (phone && digitsOnly(row[1]) === phone) return true;
+    return Boolean((incoming[6] && clean(row[6]) === incoming[6]) || (incoming[7] && clean(row[7]) === incoming[7]));
+  });
+}
+
 function upsertOwnerRow(viewer, incoming) {
   const data = ownersData(viewer);
-  let rowIndex = data.rows.findIndex(row => clean(row[0]) === incoming[0]);
+  let rowIndex = ownerRowIndex(data.rows, incoming);
   const created = rowIndex < 0;
   if (created) {
     data.rows.unshift(incoming);
@@ -591,12 +607,22 @@ function buildTeamContent(items, agents) {
   return `<section class="team-panel"><div class="team-heading"><div><p class="eyebrow">Apartment ownership</p><h2>Team profiles</h2><p>Open a profile to see every apartment assigned to that person.</p></div></div><div class="agent-profile-grid">${cards || '<div class="empty">No agent profiles are available yet.</div>'}</div></section>`;
 }
 
+// An apartment a person accepted is Ready For Upload for good: the automatic
+// owner and description filters must never hide it afterwards (an accept
+// comment is copied into the Owners agreement column and could otherwise
+// match an owner block). Rejected apartments stay hidden.
+function isListedApartment(item, blockedOwners) {
+  if (item._review_status === 'accepted') return true;
+  return !item._baseline && !item._excluded && item._review_status !== 'rejected' &&
+    !hasExcludedDescription(item.description) && !belongsToSavedOwner(item, blockedOwners);
+}
+
 function buildDashboard(viewer = null, view = 'all', selectedAgentId = '') {
   const ownerIds = blockedOwnerIds();
   const allVisible = [
     ...Object.values(readJsonFile(DATA_PATH)).map(item => ({ ...item, source: item.source || 'MyHome' })),
     ...Object.values(readJsonFile(SS_DATA_PATH)).map(item => ({ ...item, source: 'SS.ge' }))
-  ].filter(item => !item._baseline && !item._excluded && item._review_status !== 'rejected' && !hasExcludedDescription(item.description) && !belongsToSavedOwner(item, ownerIds))
+  ].filter(item => isListedApartment(item, ownerIds))
     .sort((a, b) => String(b.first_seen).localeCompare(String(a.first_seen)));
   const agents = managementAgents(allVisible);
   const assignableAgents = agents.filter(agent => agent.assignable);
@@ -922,10 +948,11 @@ async function reviewApartment(request, response, viewer, apartmentId) {
     const myHomeData = liveMyHomeData || loadData();
     const ssData = liveSsData || loadSsData();
     const requestedSource = clean(body.source).toLowerCase();
-    if (requestedSource && !['myhome', 'ss.ge'].includes(requestedSource)) throw new Error('Invalid apartment source');
+    if (requestedSource && !['myhome', 'ss.ge', 'word'].includes(requestedSource)) throw new Error('Invalid apartment source');
+    // Word-imported apartments are stored with the MyHome data.
     const data = requestedSource === 'ss.ge'
       ? ssData
-      : requestedSource === 'myhome'
+      : requestedSource === 'myhome' || requestedSource === 'word'
         ? myHomeData
         : myHomeData[apartmentId] ? myHomeData : ssData;
     const item = data[apartmentId];
@@ -1299,7 +1326,7 @@ function startWebServer() {
         const body = await readRequestJson(request);
         if (!Array.isArray(body.row)) throw new Error('Owner row is required');
         const incoming = OWNER_HEADERS.map((_, index) => clean(body.row[index]).slice(0, 4000));
-        if (!incoming[0]) throw new Error('Owner ID is required');
+        if (!incoming[0] && !digitsOnly(incoming[1]) && !incoming[6] && !incoming[7]) throw new Error('Owner ID, phone or listing ID is required');
         const accountResult = upsertOwnerRow(viewer, incoming);
         const adminViewer = { role: 'admin', email: 'owners-inbox' };
         const sameDatabase = ownersPathFor(viewer) === ownersPathFor(adminViewer);
@@ -1451,7 +1478,7 @@ function saveData(data, dataPath = DATA_PATH, csvPath = CSV_PATH) {
 
   const ownerIds = blockedOwnerIds();
   const rows = Object.values(data)
-    .filter(row => !row._baseline && !row._excluded && row._review_status !== 'rejected' && !hasExcludedDescription(row.description) && !belongsToSavedOwner(row, ownerIds))
+    .filter(row => isListedApartment(row, ownerIds))
     .sort((a, b) => String(b.first_seen).localeCompare(String(a.first_seen)));
   const csv = [FIELDS.map(csvCell).join(',')];
   for (const row of rows) csv.push(FIELDS.map(field => csvCell(row[field])).join(','));
