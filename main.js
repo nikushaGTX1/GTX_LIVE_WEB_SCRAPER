@@ -568,6 +568,25 @@ function ownerCellText(row, columnIndex) {
   return columnIndex === OWNER_ADDED_COLUMN && value ? dashboardDateTime(value) : value;
 }
 
+// Filter bar above the owners table. The rules run in the browser
+// (dashboard.html, applyOwnerFilters) against each row's cells.
+function ownerFiltersHtml(districts) {
+  const options = list => list.map(([value, label]) => `<option value="${html(value)}">${html(label)}</option>`).join('');
+  const select = (id, icon, label, list) => `<label class="owner-filter-field" for="${id}"><span class="owner-filter-label"><span aria-hidden="true">${icon}</span>${html(label)}</span><select id="${id}">${options(list)}</select></label>`;
+  const range = (id, icon, label, unit) => `<div class="owner-filter-field"><span class="owner-filter-label"><span aria-hidden="true">${icon}</span>${html(label)}</span><span class="owner-filter-range"><input id="${id}-min" type="number" min="0" inputmode="decimal" placeholder="Min"><span aria-hidden="true">–</span><input id="${id}-max" type="number" min="0" inputmode="decimal" placeholder="Max">${unit ? `<small>${html(unit)}</small>` : ''}</span></div>`;
+  return `<div class="owner-filters" id="owner-filters" role="group" aria-label="Filter owners">
+    ${select('owner-filter-district', '📍', 'District', [['', 'All districts'], ...districts.map(district => [district, district])])}
+    ${select('owner-filter-rooms', '🚪', 'Rooms', [['', 'Any'], ['1', '1'], ['2', '2'], ['3', '3'], ['4', '4'], ['5+', '5+']])}
+    ${select('owner-filter-bedrooms', '🛏️', 'Bedrooms', [['', 'Any'], ['1', '1'], ['2', '2'], ['3', '3'], ['4+', '4+']])}
+    ${range('owner-filter-area', '📐', 'კვადრატულობა', 'მ²')}
+    ${range('owner-filter-price', '💰', 'Price', '')}
+    ${select('owner-filter-currency', '💱', 'Currency', [['', 'Any'], ['$', '$ USD'], ['₾', '₾ GEL']])}
+    ${select('owner-filter-added', '🗓️', 'Added', [['', 'Any time'], ['today', 'Today'], ['7', 'Last 7 days'], ['30', 'Last 30 days']])}
+    ${select('owner-filter-comment', '💬', 'Agreement note', [['', 'Any'], ['with', 'Has a note'], ['without', 'No note']])}
+    <button id="owner-filter-reset" class="owner-filter-reset" type="button" disabled><span aria-hidden="true">↺</span> Reset filters</button>
+  </div>`;
+}
+
 function buildOwnersContent(viewer, subject = viewer, whole = false) {
   const readOnly = whole || ownersPathFor(subject) !== ownersPathFor(viewer);
   const displayed = whole ? ownersData(WHOLE_OWNERS_VIEWER) : ownersDataForSubject(viewer, subject);
@@ -578,7 +597,7 @@ function buildOwnersContent(viewer, subject = viewer, whole = false) {
     if (columnIndex === 4 || columnIndex === 5) return `<th><button class="owner-filter-button" type="button" data-owner-sort="${columnIndex}" aria-pressed="false">${html(header)} <span aria-hidden="true">↓</span></button></th>`;
     return `<th>${html(header)}</th>`;
   }).join('')}${readOnly ? '' : '<th class="owner-actions-column">Actions</th>'}`;
-  const rows = displayed.rows.map((row, rowIndex) => `<tr data-owner-row="${rowIndex}">${displayed.headers.map((_, columnIndex) => `<td class="owner-cell"${readOnly || columnIndex === OWNER_ADDED_COLUMN ? '' : ' contenteditable="true"'} spellcheck="false" data-owner-index="${rowIndex}" data-owner-column="${columnIndex}">${html(ownerCellText(row, columnIndex))}</td>`).join('')}${readOnly ? '' : `<td class="owner-row-actions"><button class="owner-remove" type="button" data-owner-index="${rowIndex}" aria-label="Remove owner row">Remove</button></td>`}</tr>`).join('\n');
+  const rows = displayed.rows.map((row, rowIndex) => `<tr data-owner-row="${rowIndex}">${displayed.headers.map((_, columnIndex) => `<td class="owner-cell"${readOnly || columnIndex === OWNER_ADDED_COLUMN ? '' : ' contenteditable="true"'} spellcheck="false" data-owner-index="${rowIndex}" data-owner-column="${columnIndex}"${columnIndex === OWNER_ADDED_COLUMN ? ` data-added="${html(row[columnIndex] ?? '')}"` : ''}>${html(ownerCellText(row, columnIndex))}</td>`).join('')}${readOnly ? '' : `<td class="owner-row-actions"><button class="owner-remove" type="button" data-owner-index="${rowIndex}" aria-label="Remove owner row">Remove</button></td>`}</tr>`).join('\n');
   return `<section class="owners-panel" aria-labelledby="owners-title">
     <div class="owners-toolbar">
       <div><p class="eyebrow">Owner database</p><h2 id="owners-title">${whole ? 'Whole owner database' : readOnly ? `${html(subject.name)}'s Owners` : 'Owners'}</h2><p id="owners-import-status">${displayed.rows.length} saved row(s)</p></div>
@@ -595,6 +614,7 @@ function buildOwnersContent(viewer, subject = viewer, whole = false) {
       <input id="table-search-input" type="search" placeholder="Search any owner field..." autocomplete="off" data-search-table=".owners-table" data-search-rows="tbody tr">
       <span id="table-search-status" aria-live="polite"></span>
     </div>
+    ${ownerFiltersHtml(districts)}
     <div class="owners-table-wrap"><table class="owners-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>
   </section>`;
 }

@@ -506,6 +506,52 @@
       const number = Number(normalized);
       return Number.isFinite(number) ? number : Number.NEGATIVE_INFINITY;
     };
+    const ownerField = id => document.getElementById(id)?.value.trim() || '';
+    const firstNumber = (text, pattern) => {
+      const found = String(text).match(pattern);
+      return found ? Number(found[1]) : null;
+    };
+    // "3 ოთახი 2 საძ": rooms and bedrooms are read from the same cell.
+    const ownerRooms = text => firstNumber(text, /(\d+)\s*\+?\s*ოთახ/i) ?? firstNumber(text, /^\s*(\d+)/);
+    const ownerBedrooms = text => firstNumber(text, /(\d+)\s*\+?\s*საძ/i);
+    const countMatches = (value, wanted) => wanted.endsWith('+') ? value >= Number(wanted.slice(0, -1)) : value === Number(wanted);
+    const ownerFilterPasses = row => {
+      const cell = index => row.cells[index]?.textContent.trim() || '';
+      const rooms = ownerField('owner-filter-rooms');
+      if (rooms) { const value = ownerRooms(cell(3)); if (value === null || !countMatches(value, rooms)) return false; }
+      const bedrooms = ownerField('owner-filter-bedrooms');
+      if (bedrooms) { const value = ownerBedrooms(cell(3)); if (value === null || !countMatches(value, bedrooms)) return false; }
+      for (const [prefix, index] of [['owner-filter-area', 4], ['owner-filter-price', 5]]) {
+        const min = ownerField(prefix + '-min');
+        const max = ownerField(prefix + '-max');
+        if (!min && !max) continue;
+        const value = ownerNumber(cell(index));
+        if (value === Number.NEGATIVE_INFINITY) return false;
+        if (min && value < Number(min)) return false;
+        if (max && value > Number(max)) return false;
+      }
+      const currency = ownerField('owner-filter-currency');
+      if (currency) {
+        const price = cell(5);
+        const isGel = /₾|ლარ|gel/i.test(price);
+        const isUsd = /\$|usd|დოლ/i.test(price);
+        if (currency === '₾' ? !isGel : !isUsd) return false;
+      }
+      const added = ownerField('owner-filter-added');
+      if (added) {
+        const at = Date.parse(row.cells[9]?.dataset.added || '');
+        const start = added === 'today' ? new Date().setHours(0, 0, 0, 0) : Date.now() - Number(added) * 86400000;
+        if (!Number.isFinite(at) || at < start) return false;
+      }
+      const note = ownerField('owner-filter-comment');
+      if (note === 'with' && !cell(8)) return false;
+      if (note === 'without' && cell(8)) return false;
+      return true;
+    };
+    const activeOwnerFilterCount = () => [
+      ownerDistrict, ...['rooms', 'bedrooms', 'currency', 'added', 'comment'].map(name => ownerField('owner-filter-' + name)),
+      ...['area', 'price'].map(name => ownerField('owner-filter-' + name + '-min') || ownerField('owner-filter-' + name + '-max'))
+    ].filter(Boolean).length;
     const applyOwnerFilters = () => {
       if (!ownersTable) return;
       const query = document.getElementById('table-search-input')?.value.trim().toLocaleLowerCase() || '';
@@ -517,12 +563,38 @@
         ownersTable.tBodies[0].appendChild(row);
         const districtMatches = !ownerDistrict || row.cells[2]?.textContent.trim() === ownerDistrict;
         const searchMatches = !query || row.textContent.toLocaleLowerCase().includes(query);
-        row.hidden = !districtMatches || !searchMatches;
+        row.hidden = !districtMatches || !searchMatches || !ownerFilterPasses(row);
       });
       const visible = ordered.filter(row => !row.hidden).length;
       const status = document.getElementById('table-search-status');
-      if (status) status.textContent = (query || ownerDistrict) ? `${visible} of ${ownerRows.length} shown` : `${ownerRows.length} total`;
+      const activeFilters = activeOwnerFilterCount();
+      if (status) status.textContent = (query || activeFilters) ? `${visible} of ${ownerRows.length} shown` : `${ownerRows.length} total`;
+      const reset = document.getElementById('owner-filter-reset');
+      if (reset) {
+        reset.disabled = !activeFilters;
+        reset.textContent = activeFilters ? `↺ Reset ${activeFilters} filter${activeFilters === 1 ? '' : 's'}` : '↺ Reset filters';
+      }
     };
+    // Keep the table-header district menu and the filter bar in step.
+    const syncOwnerDistrict = () => {
+      const select = document.getElementById('owner-filter-district');
+      if (select) select.value = ownerDistrict;
+      ownersTable?.querySelectorAll('[data-owner-district]').forEach(button => button.classList.toggle('active', button.dataset.ownerDistrict === ownerDistrict));
+      ownersTable?.querySelector('[data-owner-filter="district"]')?.classList.toggle('active', Boolean(ownerDistrict));
+    };
+    const ownerFilterBar = document.getElementById('owner-filters');
+    ownerFilterBar?.addEventListener('input', event => {
+      if (event.target.id === 'owner-filter-district') ownerDistrict = event.target.value;
+      syncOwnerDistrict();
+      applyOwnerFilters();
+    });
+    document.getElementById('owner-filter-reset')?.addEventListener('click', () => {
+      ownerFilterBar.querySelectorAll('select').forEach(select => { select.value = ''; });
+      ownerFilterBar.querySelectorAll('input').forEach(input => { input.value = ''; });
+      ownerDistrict = '';
+      syncOwnerDistrict();
+      applyOwnerFilters();
+    });
     ownersTable?.addEventListener('click', event => {
       const sortButton = event.target.closest('[data-owner-sort]');
       if (sortButton) {
@@ -544,10 +616,8 @@
       if (option) {
         const selected = option.dataset.ownerDistrict;
         ownerDistrict = selected && selected === ownerDistrict ? '' : selected;
-        ownersTable.querySelectorAll('[data-owner-district]').forEach(button => button.classList.toggle('active', button.dataset.ownerDistrict === ownerDistrict));
-        const trigger = ownersTable.querySelector('[data-owner-filter="district"]');
-        trigger.classList.toggle('active', Boolean(ownerDistrict));
-        trigger.setAttribute('aria-expanded', 'false');
+        syncOwnerDistrict();
+        ownersTable.querySelector('[data-owner-filter="district"]').setAttribute('aria-expanded', 'false');
         districtMenu.hidden = true;
         applyOwnerFilters();
       }
