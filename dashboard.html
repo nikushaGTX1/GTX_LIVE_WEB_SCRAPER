@@ -33,14 +33,14 @@
       </div>
     </header>
 
-    <nav class="management-nav" id="management-nav" data-current-view="{{CURRENT_VIEW}}" hidden aria-label="Management views">
+    <nav class="management-nav" id="management-nav" data-current-view="{{CURRENT_VIEW}}" aria-label="Management views">
       <a href="/" data-view="all"><svg class="ui-icon" aria-hidden="true"><use href="#icon-home"></use></svg>All apartments</a>
       <a href="/?view=accepted" data-view="accepted"><svg class="ui-icon" aria-hidden="true"><use href="#icon-upload"></use></svg>Ready For Upload</a>
-      <a href="/?view=team" data-view="team" data-management-role><svg class="ui-icon" aria-hidden="true"><use href="#icon-team"></use></svg>Team profiles</a>
+      <a href="/?view=team" data-view="team" data-management-role hidden><svg class="ui-icon" aria-hidden="true"><use href="#icon-team"></use></svg>Team profiles</a>
       <a href="/?view=owners" data-view="owners"><svg class="ui-icon" aria-hidden="true"><use href="#icon-owners"></use></svg>Owners</a>
       <input id="word-apartments-file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
-      <button id="import-word-apartments" type="button">Import Word links</button>
-      <span class="copy-accepted-group" data-ready-copy aria-label="Copy ready apartment links by approval date">
+      <button id="import-word-apartments" type="button" hidden>Import Word links</button>
+      <span class="copy-accepted-group" data-ready-copy aria-label="Copy ready apartment links by approval date" hidden>
         <button class="copy-accepted-links" type="button" data-days-ago="0">Copy today</button>
         <button class="copy-accepted-links" type="button" data-days-ago="1">Copy yesterday</button>
         <button class="copy-accepted-links" type="button" data-days-ago="3">Copy 3 days ago</button>
@@ -336,6 +336,7 @@
       showConnectionProblem();
       document.querySelector('.logout-link').hidden = true;
       managementNav.hidden = false;
+      managementNav.querySelectorAll('[data-management-role]').forEach(item => { item.hidden = false; });
       managementNav.querySelectorAll('a[data-view]').forEach(link => { link.href = 'http://localhost:3000/?view=' + link.dataset.view; });
       managementNav.querySelectorAll('button, .copy-accepted-group').forEach(element => { element.hidden = true; });
       document.querySelectorAll('.district-filters button, .listing-options-bar button, .listing-options-bar select').forEach(input => { input.disabled = true; });
