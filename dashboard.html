@@ -96,7 +96,7 @@
       <span class="district-control"><button class="district-filter" type="button" data-district="Digomi">Digomi</button><button class="district-remove" type="button" data-district="Digomi" aria-label="Remove every Digomi apartment" title="Remove every Digomi apartment" hidden>×</button></span>
     </nav>
     <div class="listing-options-bar" id="listing-options-bar">
-      <label>Property options <select id="listing-option-filter"><option value="">All options</option><option>Pet friendly</option><option>50% commission</option><option>Furnished</option><option>Short-term rental</option></select></label>
+      <label>Property options <select id="listing-option-filter"><option value="">All options</option><option>Pet friendly</option><option>50% commission</option><option>Furnished</option><option>Short-term rental</option><option>Indians allowed</option></select></label>
       <button type="button" id="listing-filter-reset">Reset filters</button>
       <span id="listing-filter-status" aria-live="polite"></span>
     </div>
@@ -749,7 +749,7 @@
         alert(error.message);
       }
     });
-    const optionLabels = ['Pet friendly', '50% commission', 'Furnished', 'Short-term rental'];
+    const optionLabels = ['Pet friendly', '50% commission', 'Furnished', 'Short-term rental', 'Indians allowed'];
     const stripPropertyOptions = text => optionLabels.reduce((value, label) => value.split('[' + label + ']').join(''), text).trim();
     const reviewCommentWithOptions = (container, editor) => {
       const note = stripPropertyOptions(editor.value);

@@ -570,7 +570,7 @@ function ownerCellText(row, columnIndex) {
 
 // Selected options stay in the comment so every existing export preserves them.
 function propertyOptionsHtml(comment = '') {
-  return `<fieldset class="property-options"><legend>Property options</legend>${['Pet friendly', '50% commission', 'Furnished', 'Short-term rental'].map(label => `<label class="option-chip"><input type="checkbox" value="${label}"${comment.includes('[' + label + ']') ? ' checked' : ''}><span>${label}</span></label>`).join('')}<small>Included in Owners and copied upload links.</small></fieldset>`;
+  return `<fieldset class="property-options"><legend>Property options</legend>${['Pet friendly', '50% commission', 'Furnished', 'Short-term rental', 'Indians allowed'].map(label => `<label class="option-chip"><input type="checkbox" value="${label}"${comment.includes('[' + label + ']') ? ' checked' : ''}><span>${label}</span></label>`).join('')}<small>Included in Owners and copied upload links.</small></fieldset>`;
 }
 
 // Filter bar rules run in dashboard.html against each owner row.
@@ -586,7 +586,7 @@ function ownerFiltersHtml(districts) {
     ${range('owner-filter-price', '💰', 'Price', '')}
     ${select('owner-filter-currency', '💱', 'Currency', [['', 'Any'], ['$', '$ USD'], ['₾', '₾ GEL']])}
     ${select('owner-filter-added', '🗓️', 'Added', [['', 'Any time'], ['today', 'Today'], ['7', 'Last 7 days'], ['30', 'Last 30 days']])}
-    ${select('owner-filter-option', '&#10003;', 'Property option', [['', 'Any option'], ['Pet friendly', 'Pet friendly'], ['50% commission', '50% commission'], ['Furnished', 'Furnished'], ['Short-term rental', 'Short-term rental']])}
+    ${select('owner-filter-option', '&#10003;', 'Property option', [['', 'Any option'], ['Pet friendly', 'Pet friendly'], ['50% commission', '50% commission'], ['Furnished', 'Furnished'], ['Short-term rental', 'Short-term rental'], ['Indians allowed', 'Indians allowed']])}
     ${select('owner-filter-comment', '💬', 'Agreement note', [['', 'Any'], ['with', 'Has a note'], ['without', 'No note']])}
     <button id="owner-filter-reset" class="owner-filter-reset" type="button" disabled><span aria-hidden="true">↺</span> Reset filters</button>
   </div>`;
@@ -712,8 +712,9 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
 
   const rows = combined.map(item => {
     const displayedAt = view === 'accepted' ? item._reviewed_at : item.first_seen;
+    const uploadedAt = (item._listing_uploads || []).at(-1)?.uploadedAt || item._api_uploaded_at || '';
     const websiteStatus = item._api_uploaded
-      ? `<span class="website-upload uploaded">Uploaded${item._website_api_apartment_id ? ` #${html(item._website_api_apartment_id)}` : ''}</span>`
+      ? `<span class="website-upload uploaded">Uploaded${item._website_api_apartment_id ? ` #${html(item._website_api_apartment_id)}` : ''}</span>${uploadedAt ? `<small class="upload-time" title="${html(uploadedAt)}">${html(dashboardDateTime(uploadedAt))}</small>` : ''}`
       : item._api_error
         ? `<span class="website-upload error" title="${html(item._api_error)}">Retrying</span>`
         : '<span class="website-upload pending">Pending</span>';
@@ -729,7 +730,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
       <td><span class="source ${item.source === 'SS.ge' ? 'ss' : ''}">${html(item.source)}</span></td>
       <td>${html(item.apartment_id)}</td>
       <td title="${html(displayedAt || '')}">${html(dashboardDateTime(displayedAt))}</td>
-      <td>${html(item.district || 'Other')}<div class="property-badges">${['Pet friendly', '50% commission', 'Furnished', 'Short-term rental'].filter(label => (item._review_comment || '').includes('[' + label + ']')).map(label => `<span>${html(label)}</span>`).join('')}</div></td>
+      <td>${html(item.district || 'Other')}<div class="property-badges">${['Pet friendly', '50% commission', 'Furnished', 'Short-term rental', 'Indians allowed'].filter(label => (item._review_comment || '').includes('[' + label + ']')).map(label => `<span>${html(label)}</span>`).join('')}</div></td>
       <td>${canReassign ? `<select class="agent-reassign" aria-label="Reassign apartment ${html(item.apartment_id)}"><option value="">Unassigned</option>${assignmentOptions(item)}</select>` : html(item.assigned_agent_name || item.assigned_agent_id || 'Pending')}</td>
       <td>${html(item.rooms || '—')}</td>
       <td>${html(item.bedrooms || '—')}</td>

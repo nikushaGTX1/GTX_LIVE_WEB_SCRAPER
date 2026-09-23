@@ -536,6 +536,7 @@ a:hover { text-decoration: underline; }
 .website-upload.uploaded { background:#e5f7ed; color:#087443; }
 .website-upload.pending { background:#edf3fa; color:#40516a; }
 .website-upload.error { background:#fff0e4; color:#a84a00; }
+.upload-time { display: block; margin-top: 4px; color: var(--muted); font-size: 11px; font-weight: 600; white-space: nowrap; }
 
 .owners-scope-link {
   display: flex;

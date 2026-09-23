@@ -27,10 +27,19 @@ test('saved options hydrate the review editor', () => {
   const end = source.indexOf('\nfunction ', start + 1);
   const context = {};
   vm.runInNewContext(source.slice(start, end), context);
-  const rendered = context.propertyOptionsHtml('Confirmed [Pet friendly] [50% commission]');
+  const rendered = context.propertyOptionsHtml('Confirmed [Pet friendly] [50% commission] [Indians allowed]');
   assert.match(rendered, /value="Pet friendly" checked/);
   assert.match(rendered, /value="50% commission" checked/);
+  assert.match(rendered, /value="Indians allowed" checked/);
   assert.doesNotMatch(rendered, /value="Furnished" checked/);
+});
+
+test('Indians allowed is a selectable option everywhere the option list appears', () => {
+  assert.match(template, /<option>Indians allowed<\/option>/);
+  assert.match(template, /optionLabels = \[.*'Indians allowed'\]/);
+  assert.match(source, /'Short-term rental', 'Indians allowed'\]\.map/);
+  assert.match(source, /'Short-term rental', 'Indians allowed'\]\.filter/);
+  assert.match(source, /\['Indians allowed', 'Indians allowed'\]/);
 });
 
 test('accepted comments and options reach matching Owners without touching unrelated rows', () => {
@@ -68,4 +77,9 @@ test('Owners property filters compose with existing price filters', () => {
   values['owner-filter-price-max'] = '';
   values['owner-filter-option'] = '50% commission';
   assert.equal(check(), false);
+});
+
+test('the website upload badge shows the latest upload time', () => {
+  assert.match(source, /const uploadedAt = \(item\._listing_uploads \|\| \[\]\)\.at\(-1\)\?\.uploadedAt \|\| item\._api_uploaded_at \|\| ''/);
+  assert.match(source, /class="upload-time" title="\$\{html\(uploadedAt\)\}"/);
 });
