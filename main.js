@@ -568,12 +568,16 @@ function ownerCellText(row, columnIndex) {
   return columnIndex === OWNER_ADDED_COLUMN && value ? dashboardDateTime(value) : value;
 }
 
-// Filter bar above the owners table. The rules run in the browser
-// (dashboard.html, applyOwnerFilters) against each row's cells.
+// Selected options stay in the comment so every existing export preserves them.
+function propertyOptionsHtml(comment = '') {
+  return `<fieldset class="property-options"><legend>Property options</legend>${['Pet friendly', '50% commission', 'Furnished', 'Short-term rental'].map(label => `<label class="option-chip"><input type="checkbox" value="${label}"${comment.includes('[' + label + ']') ? ' checked' : ''}><span>${label}</span></label>`).join('')}<small>Included in Owners and copied upload links.</small></fieldset>`;
+}
+
+// Filter bar rules run in dashboard.html against each owner row.
 function ownerFiltersHtml(districts) {
   const options = list => list.map(([value, label]) => `<option value="${html(value)}">${html(label)}</option>`).join('');
-  const select = (id, icon, label, list) => `<label class="owner-filter-field" for="${id}"><span class="owner-filter-label"><span aria-hidden="true">${icon}</span>${html(label)}</span><select id="${id}">${options(list)}</select></label>`;
-  const range = (id, icon, label, unit) => `<div class="owner-filter-field"><span class="owner-filter-label"><span aria-hidden="true">${icon}</span>${html(label)}</span><span class="owner-filter-range"><input id="${id}-min" type="number" min="0" inputmode="decimal" placeholder="Min"><span aria-hidden="true">–</span><input id="${id}-max" type="number" min="0" inputmode="decimal" placeholder="Max">${unit ? `<small>${html(unit)}</small>` : ''}</span></div>`;
+  const select = (id, icon, label, list) => `<label class="owner-filter-field" for="${id}"><span class="owner-filter-label"><svg class="ui-icon" aria-hidden="true"><use href="#icon-${id.replace('owner-filter-', '')}"></use></svg>${html(label)}</span><select id="${id}">${options(list)}</select></label>`;
+  const range = (id, icon, label, unit) => `<div class="owner-filter-field"><span class="owner-filter-label"><svg class="ui-icon" aria-hidden="true"><use href="#icon-${id.replace('owner-filter-', '')}"></use></svg>${html(label)}</span><span class="owner-filter-range"><input id="${id}-min" type="number" min="0" inputmode="decimal" placeholder="Min"><span aria-hidden="true">–</span><input id="${id}-max" type="number" min="0" inputmode="decimal" placeholder="Max">${unit ? `<small>${html(unit)}</small>` : ''}</span></div>`;
   return `<div class="owner-filters" id="owner-filters" role="group" aria-label="Filter owners">
     ${select('owner-filter-district', '📍', 'District', [['', 'All districts'], ...districts.map(district => [district, district])])}
     ${select('owner-filter-rooms', '🚪', 'Rooms', [['', 'Any'], ['1', '1'], ['2', '2'], ['3', '3'], ['4', '4'], ['5+', '5+']])}
@@ -582,6 +586,7 @@ function ownerFiltersHtml(districts) {
     ${range('owner-filter-price', '💰', 'Price', '')}
     ${select('owner-filter-currency', '💱', 'Currency', [['', 'Any'], ['$', '$ USD'], ['₾', '₾ GEL']])}
     ${select('owner-filter-added', '🗓️', 'Added', [['', 'Any time'], ['today', 'Today'], ['7', 'Last 7 days'], ['30', 'Last 30 days']])}
+    ${select('owner-filter-option', '&#10003;', 'Property option', [['', 'Any option'], ['Pet friendly', 'Pet friendly'], ['50% commission', '50% commission'], ['Furnished', 'Furnished'], ['Short-term rental', 'Short-term rental']])}
     ${select('owner-filter-comment', '💬', 'Agreement note', [['', 'Any'], ['with', 'Has a note'], ['without', 'No note']])}
     <button id="owner-filter-reset" class="owner-filter-reset" type="button" disabled><span aria-hidden="true">↺</span> Reset filters</button>
   </div>`;
@@ -713,7 +718,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
         ? `<span class="website-upload error" title="${html(item._api_error)}">Retrying</span>`
         : '<span class="website-upload pending">Pending</span>';
     const waitingForReview = item._review_status !== 'accepted';
-    const apartmentRow = `<tr data-apartment-id="${html(item.apartment_id)}" data-apartment-source="${html(item.source)}" data-district="${html(item.district || 'Other')}" class="apartment-row ${item._review_status === 'accepted' ? 'review-accepted' : ''}">
+    const apartmentRow = `<tr data-apartment-id="${html(item.apartment_id)}" data-review-comment="${html(item._review_comment || '')}" data-apartment-source="${html(item.source)}" data-district="${html(item.district || 'Other')}" class="apartment-row ${item._review_status === 'accepted' ? 'review-accepted' : ''}">
       ${canSelectTransfer ? `<td class="transfer-select-cell">${waitingForReview ? `<input class="transfer-apartment-checkbox" type="checkbox" aria-label="Select waiting apartment ${html(item.apartment_id)} for transfer">` : ''}</td>` : ''}
       <td class="review-cell">
         <div class="review-buttons">
@@ -724,7 +729,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
       <td><span class="source ${item.source === 'SS.ge' ? 'ss' : ''}">${html(item.source)}</span></td>
       <td>${html(item.apartment_id)}</td>
       <td title="${html(displayedAt || '')}">${html(dashboardDateTime(displayedAt))}</td>
-      <td>${html(item.district || 'Other')}</td>
+      <td>${html(item.district || 'Other')}<div class="property-badges">${['Pet friendly', '50% commission', 'Furnished', 'Short-term rental'].filter(label => (item._review_comment || '').includes('[' + label + ']')).map(label => `<span>${html(label)}</span>`).join('')}</div></td>
       <td>${canReassign ? `<select class="agent-reassign" aria-label="Reassign apartment ${html(item.apartment_id)}"><option value="">Unassigned</option>${assignmentOptions(item)}</select>` : html(item.assigned_agent_name || item.assigned_agent_id || 'Pending')}</td>
       <td>${html(item.rooms || '—')}</td>
       <td>${html(item.bedrooms || '—')}</td>
@@ -734,7 +739,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
       <td class="${item.phone ? '' : 'masked-phone'}">${html(item.phone || item._masked_phone || '—')}</td>
       <td><a class="listing-link" href="${html(item.url)}" target="_blank" rel="noopener noreferrer">Open listing ↗</a></td>
       <td>${websiteStatus}</td>
-      ${showManagementComments ? `<td class="accepted-agent"><strong>${html(item._reviewed_by || 'Unknown agent')}</strong><small>${item._reviewed_at ? html(item._reviewed_at) : ''}</small></td><td class="management-comment"><div class="accepted-comment-edit"><textarea class="accepted-comment-editor" maxlength="2000" aria-label="Apartment comment">${html(item._review_comment || '')}</textarea><button class="update-comment" type="button">Save comment</button></div></td>` : ''}
+      ${showManagementComments ? `<td class="accepted-agent"><strong>${html(item._reviewed_by || 'Unknown agent')}</strong><small>${item._reviewed_at ? html(item._reviewed_at) : ''}</small></td><td class="management-comment"><p class="accepted-note">${html(item._review_comment || '')}</p><details class="accepted-review-details"><summary>Edit comment &amp; options</summary><div class="accepted-comment-edit"><textarea class="accepted-comment-editor" maxlength="2000" aria-label="Apartment comment">${html(item._review_comment || '')}</textarea>${propertyOptionsHtml(item._review_comment || '')}<button class="update-comment" type="button">Save comment</button></div></details></td>` : ''}
     </tr>`;
     if (view === 'accepted') return apartmentRow;
     const columnCount = (showManagementComments ? 16 : 14) + (canSelectTransfer ? 1 : 0);
@@ -742,8 +747,9 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
       <td colspan="${columnCount}">
         <div class="comment-dropdown">
           <label class="review-comment-label">Comment
-            <textarea class="review-comment" maxlength="2000" placeholder="Add a comment before moving this apartment to Ready For Upload" required></textarea>
+            <textarea class="review-comment" maxlength="2000" placeholder="Add a comment before moving this apartment to Ready For Upload" required>${html(item._review_comment || '')}</textarea>
           </label>
+          ${propertyOptionsHtml(item._review_comment || '')}
           <div class="comment-actions">
             <button class="cancel-comment" type="button">Cancel</button>
             <button class="save-comment" type="button">Save comment &amp; move</button>
@@ -756,9 +762,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
   if (!fs.existsSync(DASHBOARD_TEMPLATE_PATH)) {
     throw new Error(`Dashboard template is missing: ${DASHBOARD_TEMPLATE_PATH}`);
   }
-  const acceptedSearch = view === 'accepted' || selectedAgentId
-    ? `<div class="table-search" role="search"><label for="table-search-input">Search ready apartments</label><input id="table-search-input" type="search" placeholder="Search ID, district, agent, phone..." autocomplete="off" data-search-table=".results-table" data-search-rows="tbody .apartment-row"><span id="table-search-status" aria-live="polite"></span></div>`
-    : '';
+  const acceptedSearch = `<div class="table-search" role="search"><label for="table-search-input">Search apartments</label><input id="table-search-input" type="search" placeholder="Search ID, district, agent, phone..." autocomplete="off" data-search-table=".results-table" data-search-rows="tbody .apartment-row"><span id="table-search-status" aria-live="polite"></span></div>`;
   const bulkTargets = selectedAgent ? assignableAgents.filter(agent => agent.id !== selectedAgent.id) : [];
   const profileBanner = selectedAgent ? `<div class="profile-filter-banner">
     <span>Showing <strong>${html(selectedAgent.name)}</strong>'s apartments</span>
@@ -1483,6 +1487,7 @@ function startWebServer() {
     }
     const files = {
       '/dashboard.css': [DASHBOARD_CSS_PATH, 'text/css; charset=utf-8'],
+      '/velven-mark.png': [path.join(ROOT, 'velven-mark.png'), 'image/png'],
       '/favicon.svg': [FAVICON_PATH, 'image/svg+xml'],
       '/favicon.ico': [FAVICON_PATH, 'image/svg+xml'],
       '/apartments.csv': [CSV_PATH, 'text/csv; charset=utf-8'],

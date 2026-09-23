@@ -194,3 +194,16 @@ you copy the local JSON data into the Railway volume.
 - When SS.ge scraping is enabled, newly scraped SS.ge apartments are also sent immediately to the Website API.
 - Website uploads do not resolve or require StreetId.
 - The dashboard Website column shows Uploaded, Pending, or Retrying so API synchronization is visible.
+
+### Property options
+
+The review comment form and Ready For Upload editor include Pet friendly,
+50% commission, Furnished, and Short-term rental checkboxes. A written comment
+is still required. Selected options are stored as bracketed labels in that same
+comment, so they persist across restarts, appear in the matching Owners agreement
+note, and travel with copied upload links. Unchecking an option and saving removes
+it. Existing comments are preserved; unmarked options mean unspecified.
+
+Use the property option filter in apartment views or Owners. Apartment search,
+district, and option filters combine; Reset filters clears them together.
+Owners keeps its existing price, rooms, area, currency, and date filters.

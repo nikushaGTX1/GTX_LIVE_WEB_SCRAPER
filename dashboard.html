@@ -3,16 +3,20 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Live Apartment Results</title>
-  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <title>Velven Live</title>
+  <link rel="icon" href="favicon.svg" type="image/svg+xml">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;500;600;700;800&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="dashboard.css">
 </head>
 <body>
+  <svg class="icon-sprite" xmlns="http://www.w3.org/2000/svg" aria-hidden="true"><symbol id="icon-home" viewBox="0 0 24 24"><path d="M3 10 12 3l9 7M5 9v12h5v-7h4v7h5V9"/></symbol><symbol id="icon-upload" viewBox="0 0 24 24"><path d="M12 16V3m-5 5 5-5 5 5M4 15v6h16v-6"/></symbol><symbol id="icon-team" viewBox="0 0 24 24"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2M16 3a4 4 0 0 1 0 8m6 10v-2a4 4 0 0 0-3-3.87M13 7a4 4 0 1 1-8 0 4 4 0 0 1 8 0"/></symbol><symbol id="icon-owners" viewBox="0 0 24 24"><path d="M4 21V3h12v18M8 7h4M8 11h4M8 15h4M16 9h4v12M2 21h20"/></symbol><symbol id="icon-district" viewBox="0 0 24 24"><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 1 1 16 0ZM15 10a3 3 0 1 1-6 0 3 3 0 0 1 6 0"/></symbol><symbol id="icon-rooms" viewBox="0 0 24 24"><path d="M4 21V3h13v18M2 21h20M13 12h.01"/></symbol><symbol id="icon-bedrooms" viewBox="0 0 24 24"><path d="M3 18v3m18-3v3M3 18V7h18v11ZM3 12h18M7 7v5m10-5v5"/></symbol><symbol id="icon-area" viewBox="0 0 24 24"><path d="M3 3h18v18H3ZM7 3v4m5-4v3m5-3v4M3 7h4m-4 5h3m-3 5h4"/></symbol><symbol id="icon-price" viewBox="0 0 24 24"><path d="M3 6h18v14H3ZM3 6l15-3v3M16 11h5v5h-5Z"/></symbol><symbol id="icon-currency" viewBox="0 0 24 24"><path d="M12 2v20m5-16H9a4 4 0 0 0 0 8h6a4 4 0 0 1 0 8H6"/></symbol><symbol id="icon-added" viewBox="0 0 24 24"><path d="M3 5h18v16H3ZM3 10h18M7 3v4m10-4v4M7 14h2m4 0h2m-8 3h2"/></symbol><symbol id="icon-option" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></symbol><symbol id="icon-comment" viewBox="0 0 24 24"><path d="M21 3H3v14h5l4 4 4-4h5ZM7 8h10M7 12h6"/></symbol><symbol id="icon-search" viewBox="0 0 24 24"><path d="M21 21l-6-6M17 10a7 7 0 1 1-14 0 7 7 0 0 1 14 0"/></symbol></svg>
   <main class="dashboard">
     <header class="dashboard-header">
       <div>
-        <p class="eyebrow">MyHome &amp; SS.ge watcher</p>
-        <h1>Live Apartment Results</h1>
+        <a class="velven-brand" href="/" aria-label="Velven Live home"><img src="velven-mark.png" width="40" height="49" alt=""><span>VELVEN <b>LIVE</b></span></a>
+        <h1>Live apartments<span class="heading-dot">.</span></h1>
         <p class="status" id="refresh-status">Auto-refreshes every 3 seconds</p>
       </div>
       <div class="header-meta">
@@ -30,10 +34,10 @@
     </header>
 
     <nav class="management-nav" id="management-nav" data-current-view="{{CURRENT_VIEW}}" hidden aria-label="Management views">
-      <a href="/" data-view="all">All apartments</a>
-      <a href="/?view=accepted" data-view="accepted">✓ Ready For Upload</a>
-      <a href="/?view=team" data-view="team" data-management-role>Team profiles</a>
-      <a href="/?view=owners" data-view="owners">Owners</a>
+      <a href="/" data-view="all"><svg class="ui-icon" aria-hidden="true"><use href="#icon-home"></use></svg>All apartments</a>
+      <a href="/?view=accepted" data-view="accepted"><svg class="ui-icon" aria-hidden="true"><use href="#icon-upload"></use></svg>Ready For Upload</a>
+      <a href="/?view=team" data-view="team" data-management-role><svg class="ui-icon" aria-hidden="true"><use href="#icon-team"></use></svg>Team profiles</a>
+      <a href="/?view=owners" data-view="owners"><svg class="ui-icon" aria-hidden="true"><use href="#icon-owners"></use></svg>Owners</a>
       <input id="word-apartments-file" type="file" accept=".docx,application/vnd.openxmlformats-officedocument.wordprocessingml.document" hidden>
       <button id="import-word-apartments" type="button">Import Word links</button>
       <span class="copy-accepted-group" data-ready-copy aria-label="Copy ready apartment links by approval date">
@@ -42,6 +46,7 @@
         <button class="copy-accepted-links" type="button" data-days-ago="3">Copy 3 days ago</button>
       </span>
     </nav>
+    <aside id="connection-notice" class="connection-notice" role="status" hidden></aside>
     <p id="word-import-status" class="word-import-status" hidden aria-live="polite"></p>
 
     <section class="admin-controls" id="admin-controls" aria-labelledby="watcher-controls-title">
@@ -90,6 +95,11 @@
       <span class="district-control"><button class="district-filter" type="button" data-district="Didi Dighomi">Didi Dighomi</button><button class="district-remove" type="button" data-district="Didi Dighomi" aria-label="Remove every Didi Dighomi apartment" title="Remove every Didi Dighomi apartment" hidden>×</button></span>
       <span class="district-control"><button class="district-filter" type="button" data-district="Digomi">Digomi</button><button class="district-remove" type="button" data-district="Digomi" aria-label="Remove every Digomi apartment" title="Remove every Digomi apartment" hidden>×</button></span>
     </nav>
+    <div class="listing-options-bar" id="listing-options-bar">
+      <label>Property options <select id="listing-option-filter"><option value="">All options</option><option>Pet friendly</option><option>50% commission</option><option>Furnished</option><option>Short-term rental</option></select></label>
+      <button type="button" id="listing-filter-reset">Reset filters</button>
+      <span id="listing-filter-status" aria-live="polite"></span>
+    </div>
 
     <section class="results" id="dashboard-content" aria-label="Apartment results">
       {{DASHBOARD_CONTENT}}
@@ -107,16 +117,21 @@
     const toggle = document.getElementById('watcher-toggle');
     const form = document.getElementById('watcher-form');
     const message = document.getElementById('watcher-message');
+    const templatePreview = content.textContent.trim() === '{{DASHBOARD_CONTENT}}';
+    const offlinePreview = templatePreview || location.protocol === 'file:';
     let watcherConfig = null;
     let reviewInteractionUntil = 0;
     let wordImportInProgress = false;
     if (count.textContent.includes('{{LISTING_COUNT}}')) count.textContent = '0';
     if (viewer.textContent.includes('{{LOGGED_IN_AS}}')) viewer.textContent = 'Template preview';
-    if (viewerRole.textContent.includes('{{LOGGED_IN_ROLE}}')) viewerRole.textContent = 'admin';
+    if (viewerRole.textContent.includes('{{LOGGED_IN_ROLE}}')) viewerRole.textContent = 'Not connected';
     const managementNav = document.getElementById('management-nav');
     if (managementNav.dataset.currentView.includes('{{CURRENT_VIEW}}')) managementNav.dataset.currentView = 'all';
     managementNav.querySelectorAll('a').forEach(link => link.classList.toggle('active', link.dataset.view === managementNav.dataset.currentView));
     const ownersView = managementNav.dataset.currentView === 'owners';
+    const viewTitles = { all: 'Live apartments', accepted: 'Ready for upload', owners: 'Owners', team: 'Team profiles' };
+    document.querySelector('h1').textContent = viewTitles[managementNav.dataset.currentView] || viewTitles.all;
+    document.title = 'Velven Live | ' + ({ all: 'Apartments', accepted: 'Ready For Upload', owners: 'Owners', team: 'Team' }[managementNav.dataset.currentView] || 'Apartments');
     const teamView = managementNav.dataset.currentView === 'team';
     // Set while a single agent's profile is open from Team profiles. Every
     // removal made here must stay limited to that agent's apartments.
@@ -177,15 +192,28 @@
       }
     }));
     if (content.childElementCount === 0 && content.textContent.trim() === '{{DASHBOARD_CONTENT}}') {
-      content.innerHTML = '<div class="empty">Template preview — run the scraper to see live apartments.</div>';
+      content.innerHTML = '<div class="empty preview-empty"><svg class="ui-icon" aria-hidden="true"><use href="#icon-home"></use></svg><h2>Your live workspace is one step away</h2><p>This is a design preview. Apartment data loads when you open the running Velven Live app.</p><a class="preview-open" href="http://localhost:3000">Open local app &rarr;</a></div>';
     }
+    let currentDistrict = 'all';
     const applyDistrict = district => {
+      currentDistrict = district;
+      const option = document.getElementById('listing-option-filter').value;
+      const query = document.getElementById('table-search-input')?.value.trim().toLocaleLowerCase() || '';
+      let visible = 0;
+      let total = 0;
       document.querySelectorAll('.district-filter').forEach(item => {
         item.classList.toggle('active', item.dataset.district === district);
       });
       document.querySelectorAll('tbody tr.apartment-row[data-district]').forEach(row => {
-        row.hidden = district !== 'all' && row.dataset.district !== district;
+        row.hidden = (district !== 'all' && row.dataset.district !== district) ||
+          (option && !(row.dataset.reviewComment || '').includes('[' + option + ']')) ||
+          (query && !(row.textContent + ' ' + (row.dataset.reviewComment || '')).toLocaleLowerCase().includes(query));
+        total += 1;
+        if (!row.hidden) visible += 1;
       });
+      document.getElementById('listing-filter-status').textContent = `${visible} of ${total} apartments`;
+      const searchStatus = document.getElementById('table-search-status');
+      if (searchStatus && !ownersView) searchStatus.textContent = `${visible} of ${total} shown`;
       document.querySelectorAll('tbody tr.comment-row').forEach(row => { row.hidden = true; });
     };
     document.querySelectorAll('.district-filter').forEach(button => {
@@ -193,6 +221,15 @@
         localStorage.setItem(`apartment-district-${managementNav.dataset.currentView}`, button.dataset.district);
         applyDistrict(button.dataset.district);
       });
+    });
+    document.getElementById('listing-options-bar').hidden = ownersView || teamView;
+    document.getElementById('listing-option-filter').addEventListener('change', () => applyDistrict(currentDistrict));
+    document.getElementById('listing-filter-reset').addEventListener('click', () => {
+      document.getElementById('listing-option-filter').value = '';
+      const search = document.getElementById('table-search-input');
+      if (search) search.value = '';
+      localStorage.removeItem(`apartment-district-${managementNav.dataset.currentView}`);
+      applyDistrict('all');
     });
     const districtStorageKey = `apartment-district-${managementNav.dataset.currentView}`;
     const savedDistrict = managementNav.dataset.currentView === 'accepted'
@@ -278,8 +315,33 @@
       showWatcherConfig(result);
       message.textContent = 'Scraper settings saved.';
     };
-    fetch('/api/watcher/config').then(response => response.json()).then(showWatcherConfig)
-      .catch(error => { message.textContent = error.message; });
+    const showConnectionProblem = () => {
+      const notice = document.getElementById('connection-notice');
+      notice.hidden = false;
+      notice.innerHTML = '<strong>' + (templatePreview ? 'You are viewing the design preview' : 'Live connection unavailable') + '</strong><p>For local use, run <code>run.bat</code> and open <a href="http://localhost:3000">http://localhost:3000</a>. For the hosted workspace, open your Velven Live Railway service URL. A static preview cannot load the scraper database.</p>';
+      document.getElementById('refresh-status').textContent = templatePreview ? 'Design preview - no live data connection' : 'Not connected to the live server';
+      document.getElementById('scraper-state').textContent = 'Offline';
+      document.getElementById('scraper-status-message').textContent = 'Open the running app to connect';
+      toggle.textContent = 'Not connected';
+      document.querySelectorAll('#admin-controls button, #admin-controls input').forEach(input => { input.disabled = true; });
+    };
+    const fetchWatcherConfig = async () => {
+      const response = await fetch('/api/watcher/config');
+      if (!response.ok || !response.headers.get('content-type')?.includes('application/json')) throw new Error('Live server unavailable');
+      const config = await response.json();
+      if (!Array.isArray(config.searches) || !Array.isArray(config.presets)) throw new Error('Invalid server response');
+      return config;
+    };
+    if (offlinePreview) {
+      showConnectionProblem();
+      document.querySelector('.logout-link').hidden = true;
+      managementNav.hidden = false;
+      managementNav.querySelectorAll('a[data-view]').forEach(link => { link.href = 'http://localhost:3000/?view=' + link.dataset.view; });
+      managementNav.querySelectorAll('button, .copy-accepted-group').forEach(element => { element.hidden = true; });
+      document.querySelectorAll('.district-filters button, .listing-options-bar button, .listing-options-bar select').forEach(input => { input.disabled = true; });
+    } else {
+      fetchWatcherConfig().then(showWatcherConfig).catch(showConnectionProblem);
+    }
     document.getElementById('clear-pending-apartments').addEventListener('click', async event => {
       const button = event.currentTarget;
       const globalRemoval = watcherConfig?.canManage && !profileAgentId;
@@ -410,9 +472,14 @@
         importWordButton.textContent = 'Import Word links';
       }
     });
-    setInterval(() => {
-      fetch('/api/watcher/config').then(response => response.json())
-        .then(config => showWatcherStatus(config.status)).catch(() => {});
+    if (!offlinePreview) setInterval(() => {
+      fetchWatcherConfig().then(config => {
+        if (!watcherConfig) {
+          document.getElementById('connection-notice').hidden = true;
+          document.querySelectorAll('#admin-controls button, #admin-controls input').forEach(input => { input.disabled = false; });
+          showWatcherConfig(config);
+        } else showWatcherStatus(config.status);
+      }).catch(() => {});
     }, 1000);
     toggle.addEventListener('click', () => {
       if (!watcherConfig) return;
@@ -543,13 +610,15 @@
         const start = added === 'today' ? new Date().setHours(0, 0, 0, 0) : Date.now() - Number(added) * 86400000;
         if (!Number.isFinite(at) || at < start) return false;
       }
+      const option = ownerField('owner-filter-option');
+      if (option && !cell(8).includes('[' + option + ']')) return false;
       const note = ownerField('owner-filter-comment');
       if (note === 'with' && !cell(8)) return false;
       if (note === 'without' && cell(8)) return false;
       return true;
     };
     const activeOwnerFilterCount = () => [
-      ownerDistrict, ...['rooms', 'bedrooms', 'currency', 'added', 'comment'].map(name => ownerField('owner-filter-' + name)),
+      ownerDistrict, ...['rooms', 'bedrooms', 'currency', 'added', 'comment', 'option'].map(name => ownerField('owner-filter-' + name)),
       ...['area', 'price'].map(name => ownerField('owner-filter-' + name + '-min') || ownerField('owner-filter-' + name + '-max'))
     ].filter(Boolean).length;
     const applyOwnerFilters = () => {
@@ -638,6 +707,7 @@
           applyOwnerFilters();
           return;
         }
+        if (table?.matches('.results-table')) { applyDistrict(currentDistrict); return; }
         const query = tableSearchInput.value.trim().toLocaleLowerCase();
         let visible = 0;
         searchableRows.forEach(row => {
@@ -679,7 +749,20 @@
         alert(error.message);
       }
     });
+    const optionLabels = ['Pet friendly', '50% commission', 'Furnished', 'Short-term rental'];
+    const stripPropertyOptions = text => optionLabels.reduce((value, label) => value.split('[' + label + ']').join(''), text).trim();
+    const reviewCommentWithOptions = (container, editor) => {
+      const note = stripPropertyOptions(editor.value);
+      if (!note) return '';
+      const tags = [...container.querySelectorAll('.property-options input:checked')].map(input => '[' + input.value + ']');
+      return [note, ...tags].join(' ');
+    };
+    document.querySelectorAll('.review-comment, .accepted-comment-editor').forEach(editor => {
+      editor.value = stripPropertyOptions(editor.value);
+      editor.defaultValue = editor.value;
+    });
     const saveReview = async (row, action, comment = '', extra = {}) => {
+      if (comment.length > 2000) throw new Error('Please shorten your comment so the comment and selected options fit within 2,000 characters.');
       const response = await fetch(`/api/apartments/${row.dataset.apartmentId}/review`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -771,7 +854,7 @@
         if (event.target.closest('.update-comment')) {
           const button = event.target.closest('.update-comment');
           const editor = row.querySelector('.accepted-comment-editor');
-          const comment = editor.value.trim();
+          const comment = reviewCommentWithOptions(row, editor);
           if (!comment) {
             alert('Please enter a comment before saving.');
             editor.focus();
@@ -782,7 +865,9 @@
           button.textContent = 'Saving…';
           await saveReview(row, 'update-comment', comment);
           button.textContent = 'Saved';
-          editor.defaultValue = comment;
+          editor.defaultValue = editor.value;
+          row.dataset.reviewComment = comment;
+          location.reload();
           setTimeout(() => {
             button.disabled = false;
             button.textContent = 'Save comment';
@@ -810,7 +895,7 @@
           return;
         }
         if (event.target.closest('.save-comment')) {
-          const comment = commentRow.querySelector('.review-comment').value.trim();
+          const comment = reviewCommentWithOptions(commentRow, commentRow.querySelector('.review-comment'));
           if (!comment) {
             alert('Please add a comment before moving this apartment to Ready For Upload.');
             commentRow.querySelector('.review-comment').focus();
@@ -833,11 +918,15 @@
           return;
         }
       } catch (error) {
+        const button = event.target.closest('.save-comment, .update-comment');
+        if (button) { button.disabled = false; button.textContent = button.matches('.save-comment') ? 'Save comment & move' : 'Save comment'; }
         alert(error.message);
       }
     });
     setInterval(() => {
-      const editingReview = document.activeElement.closest?.('.comment-row');
+      const dirtyReview = [...document.querySelectorAll('.accepted-comment-editor')].some(editor => editor.value !== editor.defaultValue) ||
+        [...document.querySelectorAll('.accepted-comment-edit input[type=checkbox]')].some(input => input.checked !== input.defaultChecked);
+      const editingReview = dirtyReview || document.querySelector('.comment-row:not([hidden])') || document.activeElement.closest?.('.accepted-comment-edit');
       if (!ownersView && !teamView && !wordImportInProgress && watcherConfig?.enabled && !editingReview && Date.now() > reviewInteractionUntil && !document.activeElement.closest?.('.admin-controls')) location.reload();
     }, 3000);
   </script>
