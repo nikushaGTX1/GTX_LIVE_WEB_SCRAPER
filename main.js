@@ -1527,6 +1527,52 @@ async function launchBrowserContext(options) {
   }
 }
 
+// Chromium is only launched while the watcher is enabled. Pausing releases it
+// (closing a persistent context's context closes the whole browser process,
+// so this alone frees Chromium's memory) instead of leaving it idle for the
+// rest of the process lifetime. browserContextPromise serializes concurrent
+// callers so a paused/resumed flag flipped mid-launch can't start a second
+// browser; the watcher loop itself is a single sequential while(true), so it
+// never calls this concurrently with itself either.
+let browserContext = null;
+let browserContextPromise = null;
+
+async function ensureBrowserContext(options) {
+  if (browserContext) return browserContext;
+  if (!browserContextPromise) {
+    browserContextPromise = (async () => {
+      console.log('Resuming: launching the browser…');
+      const context = await launchBrowserContext(options);
+      if (!IS_HOSTED) {
+        const dashboardPage = context.pages()[0] || await context.newPage();
+        await dashboardPage.goto(pathToFileURL(DASHBOARD_PATH).href);
+      }
+      return context;
+    })();
+  }
+  try {
+    browserContext = await browserContextPromise;
+    return browserContext;
+  } finally {
+    browserContextPromise = null;
+  }
+}
+
+async function releaseBrowserContext() {
+  if (browserContextPromise) {
+    try { await browserContextPromise; } catch { /* launch already failed; nothing to close */ }
+  }
+  const context = browserContext;
+  browserContext = null;
+  if (!context) return;
+  try {
+    await context.close();
+    console.log('Paused: browser closed to free memory.');
+  } catch (error) {
+    console.error(`Could not close the browser cleanly: ${error.message}`);
+  }
+}
+
 function saveData(data, dataPath = DATA_PATH, csvPath = CSV_PATH) {
   const tempPath = `${dataPath}.tmp`;
   fs.writeFileSync(tempPath, JSON.stringify(data, null, 2), 'utf8');
@@ -2693,24 +2739,29 @@ async function main() {
 
   writeDashboard();
   const server = startWebServer();
-  let context;
   try {
-    context = await launchBrowserContext(options);
-    writeDashboard();
-    if (!IS_HOSTED) {
-      const dashboardPage = context.pages()[0] || await context.newPage();
-      await dashboardPage.goto(pathToFileURL(DASHBOARD_PATH).href);
-    }
     while (true) {
       console.log(`\n[${new Date().toLocaleString()}] Checking MyHome...`);
+      const browserNeeded = watcherRuntime.enabled || SS_SCRAPER_ENABLED;
       try {
-        if (watcherRuntime.enabled) await scan(context, data, state, watcherRuntime);
-        else {
+        if (!browserNeeded) {
+          // Nothing needs Chromium right now: release it instead of paying
+          // for an idle browser process for the rest of this pause.
+          await releaseBrowserContext();
           watcherStatus.state = 'paused';
           watcherStatus.message = 'MyHome scraping is paused by the admin.';
           console.log('MyHome watcher is paused by the admin.');
+        } else {
+          const context = await ensureBrowserContext(options);
+          writeDashboard();
+          if (watcherRuntime.enabled) await scan(context, data, state, watcherRuntime);
+          else {
+            watcherStatus.state = 'paused';
+            watcherStatus.message = 'MyHome scraping is paused by the admin.';
+            console.log('MyHome watcher is paused by the admin.');
+          }
+          if (SS_SCRAPER_ENABLED) await scanSs(context, ssData, state);
         }
-        if (SS_SCRAPER_ENABLED) await scanSs(context, ssData, state);
       } catch (error) {
         watcherStatus.state = 'error';
         watcherStatus.message = 'The last scraper check failed.';
@@ -2724,7 +2775,7 @@ async function main() {
   } finally {
     saveData(data);
     saveData(ssData, SS_DATA_PATH, SS_CSV_PATH);
-    if (context) await context.close();
+    await releaseBrowserContext();
     await new Promise(resolve => server.close(resolve));
   }
 }
