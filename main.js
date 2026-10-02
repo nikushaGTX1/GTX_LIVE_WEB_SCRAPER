@@ -2739,10 +2739,21 @@ async function main() {
 
   writeDashboard();
   const server = startWebServer();
+  // Pausing stops real work (above), but the tick still ran every interval
+  // and logged the same three lines regardless, spamming "paused" forever.
+  // Log the pause/resume transition once instead of every tick.
+  let wasPaused = false;
   try {
     while (true) {
-      console.log(`\n[${new Date().toLocaleString()}] Checking MyHome...`);
       const browserNeeded = watcherRuntime.enabled || SS_SCRAPER_ENABLED;
+      const myHomePaused = !watcherRuntime.enabled;
+      if (myHomePaused && !wasPaused) {
+        console.log(`\n[${new Date().toLocaleString()}] MyHome watcher paused by the admin. Checks are suspended until resumed; this won't log again until then.`);
+      } else if (!myHomePaused && wasPaused) {
+        console.log(`\n[${new Date().toLocaleString()}] MyHome watcher resumed.`);
+      }
+      wasPaused = myHomePaused;
+      if (!myHomePaused) console.log(`\n[${new Date().toLocaleString()}] Checking MyHome...`);
       try {
         if (!browserNeeded) {
           // Nothing needs Chromium right now: release it instead of paying
@@ -2750,7 +2761,6 @@ async function main() {
           await releaseBrowserContext();
           watcherStatus.state = 'paused';
           watcherStatus.message = 'MyHome scraping is paused by the admin.';
-          console.log('MyHome watcher is paused by the admin.');
         } else {
           const context = await ensureBrowserContext(options);
           writeDashboard();
@@ -2758,7 +2768,6 @@ async function main() {
           else {
             watcherStatus.state = 'paused';
             watcherStatus.message = 'MyHome scraping is paused by the admin.';
-            console.log('MyHome watcher is paused by the admin.');
           }
           if (SS_SCRAPER_ENABLED) await scanSs(context, ssData, state);
         }
@@ -2769,7 +2778,7 @@ async function main() {
         console.error(`Scan failed: ${error.message}`);
       }
       if (options.once) break;
-      console.log(`Next check in ${watcherRuntime.interval} seconds.`);
+      if (!myHomePaused) console.log(`Next check in ${watcherRuntime.interval} seconds.`);
       await sleep(watcherRuntime.interval * 1000);
     }
   } finally {
