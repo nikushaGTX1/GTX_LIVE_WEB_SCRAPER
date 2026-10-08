@@ -1379,6 +1379,77 @@ function startWebServer() {
       }
       return;
     }
+    if (pathname === '/api/apartments/import-scraped' && request.method === 'POST') {
+      // Fed by the Nikas extension's own scrape: it reads a MyHome search
+      // page's rendered results in the admin/manager's real, already-
+      // Cloudflare-cleared browser session and posts the raw listing cards
+      // here - the same card shape (id, price, room, bedroom, area, comment,
+      // dynamic_title/dynamic_slug, user_id, urban_name, ...) the scraper's
+      // own collectApiCards produces from a rendered page, so it is run
+      // through the exact same owner/description filters and saved the same
+      // way. Only a phone number is missing (not present on a list card);
+      // the scraper's existing repair pass fills that in on its next tick.
+      if (!['admin', 'manager'].includes(viewer.role)) {
+        response.writeHead(403, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: 'Admin or manager access is required to import scraped apartments' }));
+        return;
+      }
+      try {
+        const body = await readRequestJson(request);
+        if (!Array.isArray(body.rows) || !body.rows.length) throw new Error('No scraped listings were sent');
+        if (body.rows.length > 2000) throw new Error('A scraped batch is limited to 2,000 listings');
+        const fallbackDistrict = clean(body.district) || 'Other';
+        const data = liveMyHomeData || loadData();
+        const ssData = liveSsData || loadSsData();
+        const permanentKeys = permanentApartmentKeys(data, ssData);
+        const blockedOwners = blockedOwnerIds();
+        let imported = 0;
+        let duplicates = 0;
+        let permanentlyDismissed = 0;
+        let filteredOwner = 0;
+        let filteredDescription = 0;
+        let invalid = 0;
+        for (const row of body.rows) {
+          const id = String(row?.id ?? '').trim();
+          if (!id || !/^\d+$/.test(id)) { invalid += 1; continue; }
+          if (permanentKeys.has(apartmentRegistryKey('MyHome', id))) { permanentlyDismissed += 1; continue; }
+          const existing = data[id];
+          if (existing && !(existing._baseline && !existing._excluded && !existing.title)) { duplicates += 1; continue; }
+          const district = districtNameFromApiCard(row, fallbackDistrict);
+          const item = myHomeApartment(row, id, '', new Date().toISOString(), district);
+          if (belongsToSavedOwner(item, blockedOwners)) {
+            item._baseline = true;
+            item._excluded = true;
+            item._excluded_reason = 'owner_id';
+            data[id] = item;
+            filteredOwner += 1;
+            continue;
+          }
+          const descriptionMatch = excludedDescriptionMatch(item.description);
+          if (descriptionMatch) {
+            item._baseline = true;
+            item._excluded = true;
+            item._excluded_reason = 'description';
+            data[id] = item;
+            filteredDescription += 1;
+            continue;
+          }
+          item._baseline = false;
+          item._imported_via = 'extension';
+          item._imported_by = viewer.name || viewer.email;
+          data[id] = item;
+          imported += 1;
+        }
+        if (imported || filteredOwner || filteredDescription) saveData(data);
+        if (imported) await assignPendingApartments(data, loadState());
+        response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ ok: true, imported, duplicates, permanentlyDismissed, filteredOwner, filteredDescription, invalid }));
+      } catch (error) {
+        response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: error.message }));
+      }
+      return;
+    }
     if (pathname === '/api/owners' && request.method === 'GET') {
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       response.end(JSON.stringify(ownersData(viewer)));
