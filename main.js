@@ -1303,6 +1303,11 @@ function startWebServer() {
         let excluded = 0;
         let duplicates = 0;
         let detailErrors = 0;
+        // Resolving a MyHome link now means rendering its page (the direct
+        // API is locked down), so a browser page is created lazily - only if
+        // a row actually has a MyHome URL - and reused for the whole import.
+        let wordImportPage = null;
+        try {
         for (let rowIndex = 0; rowIndex < body.rows.length; rowIndex += 1) {
           const input = body.rows[rowIndex];
           if (!input || typeof input !== 'object' || Array.isArray(input)) continue;
@@ -1335,7 +1340,8 @@ function startWebServer() {
           };
           if (values.url) {
             try {
-              const detail = await getMyHomeStatement(apartmentId);
+              if (!wordImportPage) wordImportPage = await (await ensureBrowserContext({})).newPage();
+              const detail = await getMyHomeStatement(wordImportPage, apartmentId);
               const phoneInfo = myHomePhoneInfo(detail);
               item = myHomeApartment(detail, apartmentId, phoneInfo.phone, item.first_seen, item.district);
               item._imported_from_word = true;
@@ -1352,6 +1358,9 @@ function startWebServer() {
           }
           data[apartmentId] = item;
           imported += 1;
+        }
+        } finally {
+          if (wordImportPage) await wordImportPage.close();
         }
         if (!imported && duplicates) {
           response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
@@ -1611,19 +1620,6 @@ function cardIsFromToday(text) {
   return Number(found[1]) === today.day && months[found[2]] === today.month;
 }
 
-function apiUrl(searchUrl, pageNumber) {
-  const source = new URL(searchUrl);
-  const target = new URL('https://api-statements.tnet.ge/v1/statements');
-  for (const [key, value] of source.searchParams) {
-    const normalizedKey = key.toLowerCase();
-    if (normalizedKey !== 'cardview' && normalizedKey !== 'page') {
-      target.searchParams.append(key, value);
-    }
-  }
-  target.searchParams.set('page', String(pageNumber));
-  return target.toString();
-}
-
 function districtNameFromUrl(value) {
   const slug = new URL(value).pathname.split('/').filter(Boolean).at(-1) || 'custom';
   const names = { saburtalo: 'Saburtalo', vake: 'Vake', 'didi-dighomi': 'Didi Dighomi', digomi: 'Digomi' };
@@ -1689,36 +1685,46 @@ function searchKey(searchUrl, pageCount) {
   return `${url.toString()}|pages=${pageCount}`;
 }
 
-// A 401 from MyHome's feed means their public x-website-key rejected us
-// outright - no amount of retrying fixes that on our side, only a new key
-// from MyHome does. Tag it so the watcher loop can back off and log once
-// instead of hammering a dead endpoint and spamming the log every tick.
-function myHomeFeedError(status, label = 'MyHome feed') {
-  const error = new Error(`${label} returned HTTP ${status}`);
-  if (status === 401) error.myHomeUnauthorized = true;
-  return error;
+// MyHome's public x-website-key feed (api-statements.tnet.ge/v1/statements)
+// started returning a flat 401 from their own backend for every request,
+// including ones that worked earlier in this project's history, while the
+// lightweight /count sibling endpoint keeps working with the same key - this
+// is MyHome locking down the data-bearing route specifically, not a header
+// or Cloudflare problem we can fix by changing the request.
+//
+// Their search-results and detail pages still render the exact same listing
+// data server-side though, embedded in Next.js's __NEXT_DATA__ script tag
+// (React Query's dehydrated state) - same field names
+// (dynamic_title/dynamic_slug/room/bedroom/area/price/...) the old API
+// returned. So listings are now read by navigating those pages in the
+// already-Cloudflare-cleared browser and extracting that embedded JSON,
+// instead of calling the now-locked API directly.
+async function readNextData(page) {
+  return page.evaluate(() => {
+    const el = document.getElementById('__NEXT_DATA__');
+    if (!el) return null;
+    try { return JSON.parse(el.textContent); } catch { return null; }
+  });
 }
 
-async function collectApiCards(searchUrl, pageCount, district = 'Unknown') {
+function findDehydratedQuery(nextData, key0, key1) {
+  const queries = nextData?.props?.pageProps?.dehydratedState?.queries;
+  if (!Array.isArray(queries)) return null;
+  return queries.find(query => query?.queryKey?.[0] === key0 && query?.queryKey?.[1] === key1) || null;
+}
+
+async function collectApiCards(page, searchUrl, pageCount, district = 'Unknown') {
   // pageCount is a safety cap, not a target: MyHome's result count varies over
   // time, so we keep requesting pages until the site itself returns an empty
   // one instead of assuming the configured count covers every listing.
   const byId = new Map();
   for (let number = 1; number <= pageCount; number += 1) {
-    const response = await fetch(apiUrl(searchUrl, number), {
-      headers: {
-        'x-website-key': 'myhome',
-        locale: 'ka',
-        referer: 'https://www.myhome.ge/'
-      }
-    });
-    if (!response.ok) throw myHomeFeedError(response.status);
-    const payload = await response.json();
-    if (!payload.result || !Array.isArray(payload.data?.data)) {
-      throw new Error(payload.errors?.message?.join?.(', ') || 'Unexpected MyHome feed response');
-    }
-    if (!payload.data.data.length) break;
-    for (const item of payload.data.data) {
+    await page.goto(pageUrl(searchUrl, number), { waitUntil: 'domcontentloaded', timeout: 90000 });
+    await waitThroughChallenge(page);
+    const items = findDehydratedQuery(await readNextData(page), 'statements', 'list')?.state?.data?.data?.data;
+    if (!Array.isArray(items)) throw new Error('Unexpected MyHome page response (listing data not found)');
+    if (!items.length) break;
+    for (const item of items) {
       const id = String(item.id);
       const slug = item.dynamic_slug || item.href_lang?.ka || item.middle_slug || 'gancxadeba';
       byId.set(id, {
@@ -1735,10 +1741,11 @@ async function collectApiCards(searchUrl, pageCount, district = 'Unknown') {
   );
 }
 
-async function collectDistrictCards(searches, pageCount) {
-  const groups = await Promise.all(searches.map(search =>
-    collectApiCards(search.url, pageCount, search.district)
-  ));
+async function collectDistrictCards(page, searches, pageCount) {
+  // One page navigates sequentially - unlike the old parallel fetch() calls,
+  // a single browser page can't load several URLs at once.
+  const groups = [];
+  for (const search of searches) groups.push(await collectApiCards(page, search.url, pageCount, search.district));
   const byId = new Map();
   for (const card of groups.flat()) if (!byId.has(card.id)) byId.set(card.id, card);
   return [...byId.values()].sort((a, b) =>
@@ -1746,18 +1753,12 @@ async function collectDistrictCards(searches, pageCount) {
   );
 }
 
-async function getMyHomeStatement(id) {
-  const response = await fetch(`https://api-statements.tnet.ge/v1/statements/${id}`, {
-    headers: {
-      'x-website-key': 'myhome',
-      locale: 'ka',
-      referer: 'https://www.myhome.ge/'
-    }
-  });
-  if (!response.ok) throw myHomeFeedError(response.status, 'MyHome detail feed');
-  const payload = await response.json();
-  if (!payload.result || !payload.data?.statement) throw new Error('MyHome detail record is not ready');
-  return payload.data.statement;
+async function getMyHomeStatement(page, id) {
+  await page.goto(`https://www.myhome.ge/udzravi-qoneba/${id}/`, { waitUntil: 'domcontentloaded', timeout: 90000 });
+  await waitThroughChallenge(page);
+  const statement = findDehydratedQuery(await readNextData(page), 'statements', 'details')?.state?.data?.data?.statement;
+  if (!statement) throw new Error('MyHome detail record is not ready');
+  return statement;
 }
 
 function myHomeUrl(source, id) {
@@ -1973,7 +1974,7 @@ async function extractPhone(page) {
   return normalizePhone(clean(await page.locator('body').innerText()));
 }
 
-async function repairMissingMyHomePhones(context, cards, data) {
+async function repairMissingMyHomePhones(page, cards, data) {
   const retryAfterMs = 10 * 60 * 1000;
   const now = Date.now();
   const pending = cards.filter(card => {
@@ -1984,22 +1985,20 @@ async function repairMissingMyHomePhones(context, cards, data) {
   if (!pending.length) return 0;
 
   let repaired = 0;
-  let repairPage = null;
   try {
-    if (!IS_HOSTED) repairPage = await context.newPage();
     for (const card of pending) {
       const saved = data[card.id];
       saved._phone_last_attempt_at = new Date().toISOString();
       saved._phone_attempts = Number(saved._phone_attempts || 0) + 1;
       try {
-        const detail = await getMyHomeStatement(card.id);
+        const detail = await getMyHomeStatement(page, card.id);
         const phoneInfo = myHomePhoneInfo(detail);
         saved._masked_phone = phoneInfo.masked || saved._masked_phone || '';
         let phone = phoneInfo.phone;
-        if (!phone && repairPage) {
-          await repairPage.goto(myHomeUrl(detail, card.id), { waitUntil: 'domcontentloaded', timeout: 90000 });
-          await waitThroughChallenge(repairPage);
-          phone = await extractPhone(repairPage);
+        if (!phone && !IS_HOSTED) {
+          await page.goto(myHomeUrl(detail, card.id), { waitUntil: 'domcontentloaded', timeout: 90000 });
+          await waitThroughChallenge(page);
+          phone = await extractPhone(page);
         }
         if (phone) {
           saved.phone = phone;
@@ -2013,7 +2012,6 @@ async function repairMissingMyHomePhones(context, cards, data) {
       }
     }
   } finally {
-    if (repairPage) await repairPage.close();
     saveData(data);
   }
   return repaired;
@@ -2025,7 +2023,7 @@ async function meta(page, selector) {
 
 async function extractDetail(page, card) {
   if (card.api) {
-    const detail = await getMyHomeStatement(card.id);
+    const detail = await getMyHomeStatement(page, card.id);
     const source = { ...card.api, ...detail };
     const correctUrl = myHomeUrl(source, card.id);
     let phone = myHomePhoneInfo(source).phone;
@@ -2418,7 +2416,19 @@ async function scan(context, data, state, options) {
   watcherStatus.found = 0;
   watcherStatus.imported = 0;
   watcherStatus.importTotal = 0;
-  const cards = await collectDistrictCards(options.searches, options.pages);
+  // Reused for every page.goto() below (search-result pages, detail pages,
+  // and individual listing extraction) since listings are now read by
+  // rendering MyHome's own pages, not calling their locked-down API.
+  const page = await context.newPage();
+  try {
+    return await runScan(page, context, data, state, options);
+  } finally {
+    await page.close();
+  }
+}
+
+async function runScan(page, context, data, state, options) {
+  const cards = await collectDistrictCards(page, options.searches, options.pages);
   const byId = new Map(cards.map(card => [card.id, card]));
   watcherStatus.found = byId.size;
 
@@ -2478,7 +2488,7 @@ async function scan(context, data, state, options) {
   });
   for (const card of repairs) {
     try {
-      const detail = await getMyHomeStatement(card.id);
+      const detail = await getMyHomeStatement(page, card.id);
       const repaired = myHomeApartment(detail, card.id, data[card.id].phone, data[card.id].first_seen, card.district || data[card.id].district);
       repaired._baseline = false;
       data[card.id] = repaired;
@@ -2488,7 +2498,7 @@ async function scan(context, data, state, options) {
       console.error(`Could not repair MyHome ID ${card.id}: ${error.message}`);
     }
   }
-  await repairMissingMyHomePhones(context, cards, data);
+  await repairMissingMyHomePhones(page, cards, data);
   try {
     await syncPendingWebsiteApartments(data, state);
   } catch (error) {
@@ -2501,9 +2511,8 @@ async function scan(context, data, state, options) {
     return 0;
   }
 
-  const detailPage = await context.newPage();
   let saved = 0;
-  try {
+  {
     const importQueue = toImport.reverse();
     for (let index = 0; index < importQueue.length; index += 1) {
       if (!options.enabled) {
@@ -2523,7 +2532,7 @@ async function scan(context, data, state, options) {
       watcherStatus.state = 'importing';
       watcherStatus.message = `Importing apartment ${index + 1} of ${importQueue.length} (ID ${card.id})…`;
       try {
-        const item = await extractDetail(detailPage, card);
+        const item = await extractDetail(page, card);
         if (belongsToSavedOwner(item, blockedOwnerIds())) {
           item._baseline = true;
           item._excluded = true;
@@ -2561,8 +2570,6 @@ async function scan(context, data, state, options) {
         console.error(`Could not read ID ${card.id}: ${error.message}`);
       }
     }
-  } finally {
-    await detailPage.close();
   }
   if (options.enabled) {
     try {
@@ -2753,10 +2760,10 @@ async function main() {
   // and logged the same three lines regardless, spamming "paused" forever.
   // Log the pause/resume transition once instead of every tick.
   let wasPaused = false;
-  // A sustained 401 means MyHome's key was revoked/rotated - retrying every
-  // interval just hammers a dead endpoint and spams the log with the same
+  // A sustained scan failure (MyHome down, stuck on a Cloudflare challenge,
+  // etc.) otherwise retries every interval and spams the log with the same
   // line forever. Log it once per outage and back off instead.
-  let myHomeUnauthorizedSince = null;
+  let scanFailingSince = null;
   try {
     while (true) {
       const browserNeeded = watcherRuntime.enabled || SS_SCRAPER_ENABLED;
@@ -2767,7 +2774,7 @@ async function main() {
         console.log(`\n[${new Date().toLocaleString()}] MyHome watcher resumed.`);
       }
       wasPaused = myHomePaused;
-      const quiet = myHomePaused || myHomeUnauthorizedSince;
+      const quiet = myHomePaused || scanFailingSince;
       if (!quiet) console.log(`\n[${new Date().toLocaleString()}] Checking MyHome...`);
       try {
         if (!browserNeeded) {
@@ -2786,26 +2793,20 @@ async function main() {
           }
           if (SS_SCRAPER_ENABLED) await scanSs(context, ssData, state);
         }
-        myHomeUnauthorizedSince = null;
+        scanFailingSince = null;
       } catch (error) {
         watcherStatus.state = 'error';
         watcherStatus.lastError = error.message;
-        if (error.myHomeUnauthorized) {
-          watcherStatus.message = 'MyHome rejected our requests (401). Their public API key likely changed - scraping is paused until it is updated.';
-          if (!myHomeUnauthorizedSince) {
-            myHomeUnauthorizedSince = Date.now();
-            console.error(`Scan failed: ${error.message}. MyHome's key appears to have been revoked or rotated; backing off and won't log this again until it recovers.`);
-          }
-        } else {
-          watcherStatus.message = 'The last scraper check failed.';
-          myHomeUnauthorizedSince = null;
-          console.error(`Scan failed: ${error.message}`);
+        watcherStatus.message = 'The last scraper check failed.';
+        if (!scanFailingSince) {
+          scanFailingSince = Date.now();
+          console.error(`Scan failed: ${error.message}. Backing off and won't log this again until it recovers.`);
         }
       }
       if (options.once) break;
-      // Keep rechecking every 10 minutes in case the key gets fixed, instead
-      // of hammering it every (short) configured interval during an outage.
-      const delaySeconds = myHomeUnauthorizedSince ? Math.max(watcherRuntime.interval, 600) : watcherRuntime.interval;
+      // Keep rechecking every 10 minutes during a sustained outage, instead
+      // of hammering a failing site every (short) configured interval.
+      const delaySeconds = scanFailingSince ? Math.max(watcherRuntime.interval, 600) : watcherRuntime.interval;
       if (!quiet) console.log(`Next check in ${delaySeconds} seconds.`);
       await sleep(delaySeconds * 1000);
     }

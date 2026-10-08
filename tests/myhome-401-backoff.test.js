@@ -8,47 +8,67 @@ const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
 
-function run(status) {
-  const context = {};
-  const start = source.indexOf('function myHomeFeedError(');
-  const end = source.indexOf('\nasync function collectApiCards(');
-  vm.runInNewContext(`${source.slice(start, end)}\nresult = myHomeFeedError(${status});`, context);
+function run(name, args) {
+  const context = { result: null };
+  const start = source.indexOf(`function ${name}(`);
+  const end = source.indexOf('\nfunction ', start + 1);
+  vm.runInNewContext(`${source.slice(start, end)}\nresult = ${name}(${args});`, context);
   return context.result;
 }
 
-test('a 401 is tagged so the watcher loop can recognize MyHome revoked the key', () => {
-  const error = run(401);
-  assert.equal(error.myHomeUnauthorized, true);
-  assert.match(error.message, /returned HTTP 401/);
+test('findDehydratedQuery picks the query by its first two key segments', () => {
+  const nextData = {
+    props: { pageProps: { dehydratedState: { queries: [
+      { queryKey: ['cardView'], state: { data: null } },
+      { queryKey: ['statements', 'list', { query: {} }], state: { data: { data: { data: [{ id: 1 }] } } } },
+      { queryKey: ['statements', 'details', { statementId: '1' }], state: { data: { data: { statement: { id: 1 } } } } }
+    ] } } }
+  };
+  const context = { nextData, result: null };
+  const start = source.indexOf('function findDehydratedQuery(');
+  const end = source.indexOf('\nasync function collectApiCards(');
+  vm.runInNewContext(`${source.slice(start, end)}\nresult = [
+    findDehydratedQuery(nextData, 'statements', 'list')?.state?.data?.data?.data,
+    findDehydratedQuery(nextData, 'statements', 'details')?.state?.data?.data?.statement,
+    findDehydratedQuery(nextData, 'nope', 'nope')
+  ];`, context);
+  assert.deepEqual(context.result[0], [{ id: 1 }]);
+  assert.deepEqual(context.result[1], { id: 1 });
+  assert.equal(context.result[2], null);
 });
 
-test('other HTTP failures are left untagged so they keep retrying normally', () => {
-  for (const status of [500, 502, 503, 429]) {
-    const error = run(status);
-    assert.equal(error.myHomeUnauthorized, undefined, String(status));
-  }
+test('findDehydratedQuery and readNextData tolerate a missing or malformed __NEXT_DATA__', () => {
+  assert.equal(run('findDehydratedQuery', 'null, "statements", "list"'), null);
+  assert.equal(run('findDehydratedQuery', '{}, "statements", "list"'), null);
+  assert.equal(run('findDehydratedQuery', '{props:{pageProps:{}}}, "statements", "list"'), null);
 });
 
-test('the detail feed reuses the same tagged error, with its own label', () => {
-  assert.match(source, /throw myHomeFeedError\(response\.status, 'MyHome detail feed'\)/);
+test('listings are read by rendering MyHome pages, not calling the locked-down API', () => {
+  // The API calls (`x-website-key` header, fetch to api-statements.tnet.ge)
+  // are gone; collectApiCards/getMyHomeStatement now navigate a page and
+  // read the embedded __NEXT_DATA__ that MyHome's own pages still render.
+  assert.doesNotMatch(source, /fetch\(.*x-website-key/);
+  assert.doesNotMatch(source, /fetch\(`https:\/\/api-statements\.tnet\.ge\/v1\/statements/);
+  assert.match(source, /async function collectApiCards\(page, searchUrl, pageCount/);
+  assert.match(source, /async function getMyHomeStatement\(page, id\)/);
+  assert.match(source, /await page\.goto\(pageUrl\(searchUrl, number\)/);
+  assert.match(source, /await page\.goto\(`https:\/\/www\.myhome\.ge\/udzravi-qoneba\/\$\{id\}\/`/);
+  assert.match(source, /findDehydratedQuery\(await readNextData\(page\), 'statements', 'list'\)/);
+  assert.match(source, /findDehydratedQuery\(await readNextData\(page\), 'statements', 'details'\)/);
 });
 
-test('list and detail feed 401s both flow through the one error constructor', () => {
-  assert.equal((source.match(/throw myHomeFeedError\(/g) || []).length, 2);
+test('every getMyHomeStatement call site has a page to pass it', () => {
+  // The function declaration plus three call sites share the scan's page;
+  // the Word-import endpoint passes its own lazily-created page instead.
+  assert.equal((source.match(/getMyHomeStatement\(page, /g) || []).length, 4);
+  assert.match(source, /getMyHomeStatement\(wordImportPage, apartmentId\)/);
+  assert.doesNotMatch(source, /getMyHomeStatement\((?!page,|wordImportPage,)/);
 });
 
-test('the watcher loop logs a sustained 401 once and backs off instead of hammering every tick', () => {
-  assert.match(source, /let myHomeUnauthorizedSince = null/);
-  assert.match(source, /if \(error\.myHomeUnauthorized\) \{/);
-  assert.match(source, /if \(!myHomeUnauthorizedSince\) \{/);
-  assert.match(source, /won't log this again until it recovers/);
-  assert.match(source, /const delaySeconds = myHomeUnauthorizedSince \? Math\.max\(watcherRuntime\.interval, 600\) : watcherRuntime\.interval/);
-  assert.match(source, /await sleep\(delaySeconds \* 1000\)/);
-  // A real scan success (not just "no error") clears the backoff so normal
-  // outages recover on the very next good tick.
-  assert.match(source, /myHomeUnauthorizedSince = null;\s*\n\s*\} catch \(error\)/);
-});
-
-test('a non-401 failure still resets the backoff and logs every tick as before', () => {
-  assert.match(source, /} else \{\s*\n\s*watcherStatus\.message = 'The last scraper check failed\.';\s*\n\s*myHomeUnauthorizedSince = null;\s*\n\s*console\.error\(`Scan failed: \$\{error\.message\}`\);/);
+test('a sustained scan failure logs once and backs off to a 10-minute recheck, any failure resets it on success', () => {
+  assert.match(source, /let scanFailingSince = null/);
+  assert.match(source, /if \(!scanFailingSince\) \{\s*\n\s*scanFailingSince = Date\.now\(\);\s*\n\s*console\.error\(`Scan failed: \$\{error\.message\}\. Backing off and won't log this again until it recovers\.`\);/);
+  assert.match(source, /scanFailingSince = null;\s*\n\s*\} catch \(error\)/);
+  assert.match(source, /const delaySeconds = scanFailingSince \? Math\.max\(watcherRuntime\.interval, 600\) : watcherRuntime\.interval/);
+  assert.match(source, /const quiet = myHomePaused \|\| scanFailingSince/);
 });
