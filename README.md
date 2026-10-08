@@ -1,5 +1,29 @@
 # MyHome new-apartment watcher
 
+For Browserbase on Railway, set `BROWSERBASE_API_KEY` in the service's Variables
+and deploy this code. No `WATCHER_CDP_URL` is needed. `BROWSERBASE_PROJECT_ID`
+is optional. Open the session link in Railway logs and use Browserbase Live
+View to complete MyHome verification. Expired/disconnected sessions are replaced
+on the next check; a session expiring during a scan can cause that scan to fail
+and retry after the usual backoff. Pause the watcher to stop browser usage.
+Browserbase plan limits and usage charges apply. For saved cookies across
+sessions, create a Browserbase Context and set `BROWSERBASE_CONTEXT_ID` to its
+ID; the watcher uses `persist: true`. Cookies do not guarantee verification
+will remain valid on a new session.
+
+If MyHome requests security verification, complete it in the scraper's visible
+browser tab. A timed-out verification tab stays open and is reused on the next
+check. Run without `--headless` for local verification.
+
+Railway runs headless and cannot show an interactive security check. To use an
+accessible browser session, set `WATCHER_CDP_URL` to its Chrome DevTools HTTP or
+WebSocket endpoint and restart the scraper. The browser must be reachable from
+the scraper, and verification must be completed in that browser. Keep this
+endpoint private: it grants control of the browser. The scraper disconnects
+from an externally connected browser when paused. Verification cookies alone
+may not transfer between browsers or network addresses. This setting does not
+automatically solve MyHome's security check.
+
 This program watches only the filtered MyHome.ge searches explicitly added by an
 admin. Optional SS.ge scraping is disabled unless enabled by environment variable.
 It opens every previously unseen listing, reveals the publicly available contact

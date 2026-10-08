@@ -6,6 +6,7 @@ const path = require('node:path');
 const crypto = require('node:crypto');
 const { pathToFileURL } = require('node:url');
 const { chromium } = require('playwright');
+const { launchBrowserbase } = require('./browserbase');
 const { excludedDescriptionMatch, hasExcludedDescription } = require('./description-filter');
 const { belongsToSavedOwner, nonCooperatingOwnerIds } = require('./owner-filter');
 
@@ -1522,6 +1523,22 @@ function startWebServer() {
 }
 
 async function launchBrowserContext(options) {
+  if (process.env.BROWSERBASE_API_KEY) {
+    const context = await launchBrowserbase(chromium, { contextId: process.env.BROWSERBASE_CONTEXT_ID });
+    console.log(`Browserbase browser: ${context._browserbaseSessionUrl} — open Live View to complete MyHome verification.`);
+    return context;
+  }
+  if (process.env.WATCHER_CDP_URL) {
+    const browser = await chromium.connectOverCDP(process.env.WATCHER_CDP_URL);
+    const context = browser.contexts()[0];
+    if (!context) {
+      await browser.close();
+      throw new Error('The connected browser has no default context.');
+    }
+    // Disconnect on pause without closing the user's browser or its tabs.
+    context.close = () => browser.close();
+    return context;
+  }
   const common = {
     headless: IS_HOSTED || options.headless,
     viewport: { width: 1440, height: 900 },
@@ -1547,12 +1564,16 @@ let browserContext = null;
 let browserContextPromise = null;
 
 async function ensureBrowserContext(options) {
+  if (browserContext && (browserContext._browserbaseDisconnected ||
+    browserContext._browserbaseExpiresAt <= Date.now())) {
+    await releaseBrowserContext();
+  }
   if (browserContext) return browserContext;
   if (!browserContextPromise) {
     browserContextPromise = (async () => {
       console.log('Resuming: launching the browser…');
       const context = await launchBrowserContext(options);
-      if (!IS_HOSTED) {
+      if (!IS_HOSTED && !context._browserbaseSessionUrl) {
         const dashboardPage = context.pages()[0] || await context.newPage();
         await dashboardPage.goto(pathToFileURL(DASHBOARD_PATH).href);
       }
@@ -1869,14 +1890,32 @@ async function waitThroughChallenge(page, timeoutMs = 180000) {
     const challenged = title.includes('just a moment') || body.includes('checking your browser') ||
       body.includes('verify you are human') || body.includes('enable javascript and cookies') ||
       body.includes('performing security verification') || body.includes('protect against malicious bots');
-    if (!challenged) return;
+    if (!challenged) {
+      page._watcherChallengePending = false;
+      return;
+    }
+    page._watcherChallengePending = true;
     if (!warned) {
-      console.log('MyHome security check is open. Complete it in the browser window...');
+      const interactive = process.env.BROWSERBASE_API_KEY || process.env.WATCHER_CDP_URL || !(IS_HOSTED || process.argv.includes('--headless'));
+      watcherStatus.message = process.env.BROWSERBASE_API_KEY
+        ? 'Complete MyHome verification in Browserbase Sessions → Live View. The scraper will reuse this tab.'
+        : interactive
+        ? 'Complete the security check in the scraper browser tab. The tab will stay open.'
+        : 'MyHome requires verification. Run the scraper with a visible browser, or set WATCHER_CDP_URL to an accessible browser session.';
+      if (!page._watcherChallengeWarned) console.log(watcherStatus.message);
+      page._watcherChallengeWarned = true;
       warned = true;
+      if (!interactive) {
+        const error = new Error(watcherStatus.message);
+        error.code = 'MYHOME_SECURITY_CHECK';
+        throw error;
+      }
     }
     await sleep(2000);
   }
-  throw new Error('The MyHome security check was not completed within 3 minutes.');
+  const error = new Error('MyHome verification is still pending. Complete it in the open scraper tab; the next check will reuse that tab.');
+  error.code = 'MYHOME_SECURITY_CHECK';
+  throw error;
 }
 
 async function collectCards(page, url) {
@@ -2419,11 +2458,22 @@ async function scan(context, data, state, options) {
   // Reused for every page.goto() below (search-result pages, detail pages,
   // and individual listing extraction) since listings are now read by
   // rendering MyHome's own pages, not calling their locked-down API.
-  const page = await context.newPage();
+  const page = context._myHomeScanPage && !context._myHomeScanPage.isClosed()
+    ? context._myHomeScanPage : await context.newPage();
+  context._myHomeScanPage = page;
   try {
+    // Do not navigate away from an unfinished verification on a retry.
+    if (page._watcherChallengePending) {
+      await waitThroughChallenge(page);
+      page._watcherChallengePending = false;
+      page._watcherChallengeWarned = false;
+    }
     return await runScan(page, context, data, state, options);
   } finally {
-    await page.close();
+    if (!page._watcherChallengePending) {
+      context._myHomeScanPage = null;
+      await page.close();
+    }
   }
 }
 
