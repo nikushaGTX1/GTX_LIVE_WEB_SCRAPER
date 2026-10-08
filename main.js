@@ -1689,6 +1689,16 @@ function searchKey(searchUrl, pageCount) {
   return `${url.toString()}|pages=${pageCount}`;
 }
 
+// A 401 from MyHome's feed means their public x-website-key rejected us
+// outright - no amount of retrying fixes that on our side, only a new key
+// from MyHome does. Tag it so the watcher loop can back off and log once
+// instead of hammering a dead endpoint and spamming the log every tick.
+function myHomeFeedError(status, label = 'MyHome feed') {
+  const error = new Error(`${label} returned HTTP ${status}`);
+  if (status === 401) error.myHomeUnauthorized = true;
+  return error;
+}
+
 async function collectApiCards(searchUrl, pageCount, district = 'Unknown') {
   // pageCount is a safety cap, not a target: MyHome's result count varies over
   // time, so we keep requesting pages until the site itself returns an empty
@@ -1702,7 +1712,7 @@ async function collectApiCards(searchUrl, pageCount, district = 'Unknown') {
         referer: 'https://www.myhome.ge/'
       }
     });
-    if (!response.ok) throw new Error(`MyHome feed returned HTTP ${response.status}`);
+    if (!response.ok) throw myHomeFeedError(response.status);
     const payload = await response.json();
     if (!payload.result || !Array.isArray(payload.data?.data)) {
       throw new Error(payload.errors?.message?.join?.(', ') || 'Unexpected MyHome feed response');
@@ -1744,7 +1754,7 @@ async function getMyHomeStatement(id) {
       referer: 'https://www.myhome.ge/'
     }
   });
-  if (!response.ok) throw new Error(`MyHome detail feed returned HTTP ${response.status}`);
+  if (!response.ok) throw myHomeFeedError(response.status, 'MyHome detail feed');
   const payload = await response.json();
   if (!payload.result || !payload.data?.statement) throw new Error('MyHome detail record is not ready');
   return payload.data.statement;
@@ -2743,6 +2753,10 @@ async function main() {
   // and logged the same three lines regardless, spamming "paused" forever.
   // Log the pause/resume transition once instead of every tick.
   let wasPaused = false;
+  // A sustained 401 means MyHome's key was revoked/rotated - retrying every
+  // interval just hammers a dead endpoint and spams the log with the same
+  // line forever. Log it once per outage and back off instead.
+  let myHomeUnauthorizedSince = null;
   try {
     while (true) {
       const browserNeeded = watcherRuntime.enabled || SS_SCRAPER_ENABLED;
@@ -2753,7 +2767,8 @@ async function main() {
         console.log(`\n[${new Date().toLocaleString()}] MyHome watcher resumed.`);
       }
       wasPaused = myHomePaused;
-      if (!myHomePaused) console.log(`\n[${new Date().toLocaleString()}] Checking MyHome...`);
+      const quiet = myHomePaused || myHomeUnauthorizedSince;
+      if (!quiet) console.log(`\n[${new Date().toLocaleString()}] Checking MyHome...`);
       try {
         if (!browserNeeded) {
           // Nothing needs Chromium right now: release it instead of paying
@@ -2771,15 +2786,28 @@ async function main() {
           }
           if (SS_SCRAPER_ENABLED) await scanSs(context, ssData, state);
         }
+        myHomeUnauthorizedSince = null;
       } catch (error) {
         watcherStatus.state = 'error';
-        watcherStatus.message = 'The last scraper check failed.';
         watcherStatus.lastError = error.message;
-        console.error(`Scan failed: ${error.message}`);
+        if (error.myHomeUnauthorized) {
+          watcherStatus.message = 'MyHome rejected our requests (401). Their public API key likely changed - scraping is paused until it is updated.';
+          if (!myHomeUnauthorizedSince) {
+            myHomeUnauthorizedSince = Date.now();
+            console.error(`Scan failed: ${error.message}. MyHome's key appears to have been revoked or rotated; backing off and won't log this again until it recovers.`);
+          }
+        } else {
+          watcherStatus.message = 'The last scraper check failed.';
+          myHomeUnauthorizedSince = null;
+          console.error(`Scan failed: ${error.message}`);
+        }
       }
       if (options.once) break;
-      if (!myHomePaused) console.log(`Next check in ${watcherRuntime.interval} seconds.`);
-      await sleep(watcherRuntime.interval * 1000);
+      // Keep rechecking every 10 minutes in case the key gets fixed, instead
+      // of hammering it every (short) configured interval during an outage.
+      const delaySeconds = myHomeUnauthorizedSince ? Math.max(watcherRuntime.interval, 600) : watcherRuntime.interval;
+      if (!quiet) console.log(`Next check in ${delaySeconds} seconds.`);
+      await sleep(delaySeconds * 1000);
     }
   } finally {
     saveData(data);
