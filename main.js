@@ -720,7 +720,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
         ? `<span class="website-upload error" title="${html(item._api_error)}">Retrying</span>`
         : '<span class="website-upload pending">Pending</span>';
     const waitingForReview = item._review_status !== 'accepted';
-    const apartmentRow = `<tr data-apartment-id="${html(item.apartment_id)}" data-review-comment="${html(item._review_comment || '')}" data-apartment-source="${html(item.source)}" data-district="${html(item.district || 'Other')}" class="apartment-row ${item._review_status === 'accepted' ? 'review-accepted' : ''}">
+    const apartmentRow = `<tr data-apartment-id="${html(item.apartment_id)}" data-review-comment="${html(item._review_comment || '')}" data-apartment-source="${html(item.source)}" data-district="${html(item.district || 'Other')}" data-property-type="${html(propertyTypeOf(item))}" class="apartment-row ${item._review_status === 'accepted' ? 'review-accepted' : ''}">
       ${canSelectTransfer ? `<td class="transfer-select-cell">${waitingForReview ? `<input class="transfer-apartment-checkbox" type="checkbox" aria-label="Select waiting apartment ${html(item.apartment_id)} for transfer">` : ''}</td>` : ''}
       <td class="review-cell">
         <div class="review-buttons">
@@ -1399,6 +1399,8 @@ function startWebServer() {
         if (!Array.isArray(body.rows) || !body.rows.length) throw new Error('No scraped listings were sent');
         if (body.rows.length > 2000) throw new Error('A scraped batch is limited to 2,000 listings');
         const fallbackDistrict = clean(body.district) || 'Other';
+        const requestedType = clean(body.propertyType).toLowerCase();
+        const propertyType = PROPERTY_TYPE_KEYS.has(requestedType) ? requestedType : '';
         const data = liveMyHomeData || loadData();
         const ssData = liveSsData || loadSsData();
         const permanentKeys = permanentApartmentKeys(data, ssData);
@@ -1417,6 +1419,7 @@ function startWebServer() {
           if (existing && !(existing._baseline && !existing._excluded && !existing.title)) { duplicates += 1; continue; }
           const district = districtNameFromApiCard(row, fallbackDistrict);
           const item = myHomeApartment(row, id, '', new Date().toISOString(), district);
+          if (propertyType) item.property_type = propertyType;
           if (belongsToSavedOwner(item, blockedOwners)) {
             item._baseline = true;
             item._excluded = true;
@@ -1851,6 +1854,26 @@ async function getMyHomeStatement(page, id) {
   const statement = findDehydratedQuery(await readNextData(page), 'statements', 'details')?.state?.data?.data?.statement;
   if (!statement) throw new Error('MyHome detail record is not ready');
   return statement;
+}
+
+// Property categories shown as tabs on the dashboard. Listings carry an
+// explicit property_type when the importer knew it (the extension sends the
+// search URL's category); otherwise it is read from the listing URL slug or
+// the Georgian title, which both MyHome and SS.ge build from the category.
+const PROPERTY_TYPES = [
+  { key: 'house', pattern: /kerdzo-saxli|[/-]saxli[/-]|კერძო სახლი|(^|\s)სახლი/i },
+  { key: 'country', pattern: /agaraki|აგარაკი/i },
+  { key: 'commercial', pattern: /komerciuli|კომერციული/i },
+  { key: 'land', pattern: /nakveti|მიწის ნაკვეთი/i },
+  { key: 'hotel', pattern: /sastumro|სასტუმრო/i },
+  { key: 'apartment', pattern: /[/-]bina[/-]|ბინა/i }
+];
+const PROPERTY_TYPE_KEYS = new Set(PROPERTY_TYPES.map(type => type.key));
+function propertyTypeOf(item) {
+  const explicit = clean(item?.property_type).toLowerCase();
+  if (PROPERTY_TYPE_KEYS.has(explicit)) return explicit;
+  const text = `${item?.url || ''} ${item?.title || ''}`;
+  return PROPERTY_TYPES.find(type => type.pattern.test(text))?.key || 'apartment';
 }
 
 function myHomeUrl(source, id) {

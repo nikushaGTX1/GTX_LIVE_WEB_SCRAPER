@@ -792,3 +792,72 @@ button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity:
   .velven-brand { margin-bottom: 16px; }
   .connection-notice { padding: 18px; }
 }
+
+/* Property type tabs (ბინები, აგარაკები, კომერციული, ...) */
+.type-filters {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 10px;
+  margin: 0 0 16px;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 18px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .04), 0 8px 24px rgba(69, 26, 143, .05);
+}
+.type-filters[hidden] { display: none; }
+.type-filter {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 52px;
+  padding: 10px 14px;
+  border: 1px solid transparent;
+  border-radius: 12px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+  text-align: left;
+  transition: background .15s ease, color .15s ease, border-color .15s ease, box-shadow .15s ease, transform .15s ease;
+}
+.type-filter .ui-icon {
+  width: 34px;
+  height: 34px;
+  padding: 7px;
+  border-radius: 10px;
+  background: rgba(69, 26, 143, .07);
+  color: var(--primary);
+  transition: background .15s ease, color .15s ease;
+}
+.type-filter span { flex: 1 1 auto; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.type-count {
+  min-width: 26px;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: rgba(69, 26, 143, .08);
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+.type-filter:hover { background: rgba(69, 26, 143, .05); border-color: rgba(69, 26, 143, .15); color: var(--primary); }
+.type-filter:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.type-filter:active { transform: translateY(1px); }
+.type-filter.empty:not(.active) { opacity: .55; }
+.type-filter.active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+  box-shadow: 0 6px 16px rgba(69, 26, 143, .28);
+}
+.type-filter.active .ui-icon { background: rgba(255, 255, 255, .16); color: #fff; }
+.type-filter.active .type-count { background: rgba(255, 255, 255, .2); color: #fff; }
+.type-filter:disabled { cursor: wait; opacity: .6; }
+@media (max-width: 640px) {
+  .type-filters { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .type-filter { min-height: 46px; padding: 8px 10px; font-size: 13px; }
+  .type-filter .ui-icon { width: 28px; height: 28px; padding: 5px; }
+}

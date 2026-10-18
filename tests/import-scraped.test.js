@@ -12,7 +12,7 @@ const route = source.slice(
   source.indexOf("    if (pathname === '/api/owners' && request.method === 'GET')")
 );
 
-function run(rows, { role = 'admin', district, existingData = {}, rejectedIds = [], ownerRows = [] } = {}) {
+function run(rows, { role = 'admin', district, propertyType, existingData = {}, rejectedIds = [], ownerRows = [] } = {}) {
   const data = existingData;
   const saves = [];
   let assigned = 0;
@@ -20,7 +20,8 @@ function run(rows, { role = 'admin', district, existingData = {}, rejectedIds = 
   const context = {
     pathname: '/api/apartments/import-scraped', request: { method: 'POST' },
     viewer: { role, name: 'Tester', email: 't@x.com' },
-    readRequestJson: async () => ({ rows, district }),
+    readRequestJson: async () => ({ rows, district, propertyType }),
+    PROPERTY_TYPE_KEYS: new Set(['apartment', 'house', 'country', 'commercial', 'land', 'hotel']),
     liveMyHomeData: data, liveSsData: {},
     loadData: () => data, loadSsData: () => ({}),
     permanentApartmentKeys: (myHomeData) => new Set(rejectedIds.map(id => `MyHome:${id}`)),
@@ -92,4 +93,11 @@ test('an empty batch is rejected', async () => {
   const r = await run([]);
   assert.equal(r.status, 400);
   assert.match(r.result.error, /No scraped listings/);
+});
+
+test('stores the property type sent by the extension, ignoring unknown types', async () => {
+  const typed = await run([{ id: '501' }], { propertyType: 'country' });
+  assert.equal(typed.data['501'].property_type, 'country');
+  const unknown = await run([{ id: '502' }], { propertyType: 'castle' });
+  assert.equal(unknown.data['502'].property_type, undefined);
 });
