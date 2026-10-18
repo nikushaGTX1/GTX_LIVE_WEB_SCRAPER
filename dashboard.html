@@ -207,45 +207,72 @@
     const typeStorageKey = `apartment-type-${managementNav.dataset.currentView}`;
     let currentType = 'all';
     try { currentType = localStorage.getItem(typeStorageKey) || 'all'; } catch {}
-    const typeCounts = () => {
-      const counts = { all: 0 };
-      document.querySelectorAll('tbody tr.apartment-row[data-district]').forEach(row => {
-        const type = row.dataset.propertyType || 'apartment';
-        counts[type] = (counts[type] || 0) + 1;
-        counts.all += 1;
-      });
+    // Rendering every row of a 1,000+ apartment table freezes the tab, so
+    // filters work on cached row data and only the first ROW_PAGE matches
+    // are shown; "Show more" reveals the next page.
+    const ROW_PAGE = 150;
+    let rowLimit = ROW_PAGE;
+    let rowCache = null;
+    const cachedRows = () => {
+      if (rowCache && rowCache.every(entry => entry.row.isConnected)) return rowCache;
+      rowCache = [...document.querySelectorAll('tbody tr.apartment-row[data-district]')].map(row => ({
+        row, district: row.dataset.district, type: row.dataset.propertyType || 'apartment',
+        comment: row.dataset.reviewComment || '', text: null
+      }));
+      const counts = { all: rowCache.length };
+      rowCache.forEach(entry => { counts[entry.type] = (counts[entry.type] || 0) + 1; });
       document.querySelectorAll('.type-filter').forEach(button => {
         const count = counts[button.dataset.type] || 0;
         button.querySelector('.type-count').textContent = count;
         button.classList.toggle('empty', count === 0 && button.dataset.type !== 'all');
       });
+      return rowCache;
     };
-    const applyDistrict = district => {
+    const resultsTbody = document.querySelector('.results-table tbody');
+    let showMore = null;
+    if (resultsTbody) {
+      showMore = document.createElement('button');
+      showMore.type = 'button';
+      showMore.className = 'show-more-rows';
+      showMore.hidden = true;
+      resultsTbody.closest('table').after(showMore);
+      showMore.addEventListener('click', () => { rowLimit += ROW_PAGE; applyDistrict(currentDistrict, true); });
+    }
+    const applyDistrict = (district, keepLimit = false) => {
+      if (!keepLimit || district !== currentDistrict) rowLimit = ROW_PAGE;
       currentDistrict = district;
-      typeCounts();
       document.querySelectorAll('.type-filter').forEach(item => {
         item.classList.toggle('active', item.dataset.type === currentType);
         item.setAttribute('aria-pressed', item.dataset.type === currentType ? 'true' : 'false');
       });
       const option = document.getElementById('listing-option-filter').value;
       const query = document.getElementById('table-search-input')?.value.trim().toLocaleLowerCase() || '';
-      let visible = 0;
-      let total = 0;
       document.querySelectorAll('.district-filter').forEach(item => {
         item.classList.toggle('active', item.dataset.district === district);
       });
-      document.querySelectorAll('tbody tr.apartment-row[data-district]').forEach(row => {
-        row.hidden = (district !== 'all' && row.dataset.district !== district) ||
-          (currentType !== 'all' && (row.dataset.propertyType || 'apartment') !== currentType) ||
-          (option && !(row.dataset.reviewComment || '').includes('[' + option + ']')) ||
-          (query && !(row.textContent + ' ' + (row.dataset.reviewComment || '')).toLocaleLowerCase().includes(query));
-        total += 1;
-        if (!row.hidden) visible += 1;
-      });
+      const rows = cachedRows();
+      let visible = 0;
+      for (const entry of rows) {
+        let matches = (district === 'all' || entry.district === district) &&
+          (currentType === 'all' || entry.type === currentType) &&
+          (!option || entry.comment.includes('[' + option + ']'));
+        if (matches && query) {
+          if (entry.text === null) entry.text = (entry.row.textContent + ' ' + entry.comment).toLocaleLowerCase();
+          matches = entry.text.includes(query);
+        }
+        if (matches) visible += 1;
+        const hidden = !matches || visible > rowLimit;
+        if (entry.row.hidden !== hidden) entry.row.hidden = hidden;
+      }
+      const total = rows.length;
       document.getElementById('listing-filter-status').textContent = `${visible} of ${total} apartments`;
       const searchStatus = document.getElementById('table-search-status');
       if (searchStatus && !ownersView) searchStatus.textContent = `${visible} of ${total} shown`;
-      document.querySelectorAll('tbody tr.comment-row').forEach(row => { row.hidden = true; });
+      if (showMore) {
+        showMore.hidden = visible <= rowLimit;
+        showMore.textContent = `Show more (${Math.min(rowLimit, visible)} of ${visible} shown)`;
+      }
+      document.querySelectorAll('tbody tr.comment-row:not([hidden])').forEach(row => { row.hidden = true; });
     };
     document.querySelectorAll('.district-filter').forEach(button => {
       button.addEventListener('click', () => {
@@ -261,7 +288,7 @@
       });
     });
     document.getElementById('type-filters').hidden = ownersView || teamView;
-    typeCounts();
+    cachedRows();
     document.getElementById('listing-options-bar').hidden = ownersView || teamView;
     document.getElementById('listing-option-filter').addEventListener('change', () => applyDistrict(currentDistrict));
     document.getElementById('listing-filter-reset').addEventListener('click', () => {
@@ -760,7 +787,8 @@
         });
         searchStatus.textContent = query ? `${visible} of ${searchableRows.length} shown` : `${searchableRows.length} total`;
       };
-      tableSearchInput.addEventListener('input', applyTableSearch);
+      let searchTimer = 0;
+      tableSearchInput.addEventListener('input', () => { clearTimeout(searchTimer); searchTimer = setTimeout(applyTableSearch, 200); });
       tableSearchInput.addEventListener('keydown', event => {
         if (event.key !== 'Escape') return;
         tableSearchInput.value = '';

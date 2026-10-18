@@ -861,3 +861,18 @@ button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity:
   .type-filter { min-height: 46px; padding: 8px 10px; font-size: 13px; }
   .type-filter .ui-icon { width: 28px; height: 28px; padding: 5px; }
 }
+.show-more-rows {
+  display: block;
+  margin: 16px auto;
+  padding: 11px 22px;
+  border: 1px solid var(--primary);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 14px;
+  font-weight: 700;
+}
+.show-more-rows:hover { background: var(--primary); color: #fff; }
+.show-more-rows[hidden] { display: none; }
