@@ -876,3 +876,56 @@ button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity:
 }
 .show-more-rows:hover { background: var(--primary); color: #fff; }
 .show-more-rows[hidden] { display: none; }
+
+/* Rent / sale switch above the property-type tabs */
+.deal-filters {
+  display: inline-grid;
+  grid-template-columns: repeat(2, minmax(170px, 1fr));
+  gap: 6px;
+  margin: 0 0 12px;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, .04);
+}
+.deal-filters[hidden] { display: none; }
+.deal-filter {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  grid-template-rows: auto auto;
+  column-gap: 12px;
+  align-items: center;
+  padding: 10px 16px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+  transition: background .15s ease, color .15s ease, box-shadow .15s ease;
+}
+.deal-filter span { font-size: 15px; font-weight: 800; }
+.deal-filter small { grid-row: 2; font-size: 11px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; opacity: .75; }
+.deal-count {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  min-width: 30px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  background: rgba(69, 26, 143, .08);
+  color: var(--primary);
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+.deal-filter:hover { background: rgba(69, 26, 143, .05); color: var(--primary); }
+.deal-filter:focus-visible { outline: 2px solid var(--primary); outline-offset: 2px; }
+.deal-filter.active[data-deal="rent"] { background: var(--primary); color: #fff; box-shadow: 0 6px 16px rgba(69, 26, 143, .28); }
+.deal-filter.active[data-deal="sale"] { background: #0f766e; color: #fff; box-shadow: 0 6px 16px rgba(15, 118, 110, .28); }
+.deal-filter.active .deal-count { background: rgba(255, 255, 255, .2); color: #fff; }
+.deal-filter:disabled { cursor: wait; opacity: .6; }
+@media (max-width: 640px) {
+  .deal-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}

@@ -87,6 +87,10 @@
       </div>
     </section>
 
+    <nav class="deal-filters" id="deal-filters" aria-label="Filter by rent or sale">
+      <button class="deal-filter active" type="button" data-deal="rent" aria-pressed="true"><span>ქირავდება</span><small>For rent</small><b class="deal-count">0</b></button>
+      <button class="deal-filter" type="button" data-deal="sale" aria-pressed="false"><span>იყიდება</span><small>For sale</small><b class="deal-count">0</b></button>
+    </nav>
     <nav class="type-filters" id="type-filters" aria-label="Filter by property type">
       <button class="type-filter active" type="button" data-type="all"><svg class="ui-icon" aria-hidden="true"><use href="#icon-type-all"></use></svg><span>ყველა</span><b class="type-count">0</b></button>
       <button class="type-filter" type="button" data-type="apartment"><svg class="ui-icon" aria-hidden="true"><use href="#icon-type-apartment"></use></svg><span>ბინები</span><b class="type-count">0</b></button>
@@ -206,6 +210,9 @@
     let currentDistrict = 'all';
     const typeStorageKey = `apartment-type-${managementNav.dataset.currentView}`;
     let currentType = 'all';
+    const dealStorageKey = `apartment-deal-${managementNav.dataset.currentView}`;
+    let currentDeal = 'rent';
+    try { currentDeal = localStorage.getItem(dealStorageKey) === 'sale' ? 'sale' : 'rent'; } catch {}
     try { currentType = localStorage.getItem(typeStorageKey) || 'all'; } catch {}
     // Rendering every row of a 1,000+ apartment table freezes the tab, so
     // filters work on cached row data and only the first ROW_PAGE matches
@@ -216,11 +223,20 @@
     const cachedRows = () => {
       if (rowCache && rowCache.every(entry => entry.row.isConnected)) return rowCache;
       rowCache = [...document.querySelectorAll('tbody tr.apartment-row[data-district]')].map(row => ({
-        row, district: row.dataset.district, type: row.dataset.propertyType || 'apartment',
+        row, district: row.dataset.district, type: row.dataset.propertyType || 'apartment', deal: row.dataset.dealType || 'rent',
         comment: row.dataset.reviewComment || '', text: null
       }));
-      const counts = { all: rowCache.length };
-      rowCache.forEach(entry => { counts[entry.type] = (counts[entry.type] || 0) + 1; });
+      const dealCounts = { rent: 0, sale: 0 };
+      rowCache.forEach(entry => { dealCounts[entry.deal] += 1; });
+      document.querySelectorAll('.deal-filter').forEach(button => {
+        button.querySelector('.deal-count').textContent = dealCounts[button.dataset.deal] || 0;
+      });
+      const counts = { all: 0 };
+      rowCache.forEach(entry => {
+        if (entry.deal !== currentDeal) return;
+        counts.all += 1;
+        counts[entry.type] = (counts[entry.type] || 0) + 1;
+      });
       document.querySelectorAll('.type-filter').forEach(button => {
         const count = counts[button.dataset.type] || 0;
         button.querySelector('.type-count').textContent = count;
@@ -245,6 +261,10 @@
         item.classList.toggle('active', item.dataset.type === currentType);
         item.setAttribute('aria-pressed', item.dataset.type === currentType ? 'true' : 'false');
       });
+      document.querySelectorAll('.deal-filter').forEach(item => {
+        item.classList.toggle('active', item.dataset.deal === currentDeal);
+        item.setAttribute('aria-pressed', item.dataset.deal === currentDeal ? 'true' : 'false');
+      });
       const option = document.getElementById('listing-option-filter').value;
       const query = document.getElementById('table-search-input')?.value.trim().toLocaleLowerCase() || '';
       document.querySelectorAll('.district-filter').forEach(item => {
@@ -254,6 +274,7 @@
       let visible = 0;
       for (const entry of rows) {
         let matches = (district === 'all' || entry.district === district) &&
+          entry.deal === currentDeal &&
           (currentType === 'all' || entry.type === currentType) &&
           (!option || entry.comment.includes('[' + option + ']'));
         if (matches && query) {
@@ -264,7 +285,7 @@
         const hidden = !matches || visible > rowLimit;
         if (entry.row.hidden !== hidden) entry.row.hidden = hidden;
       }
-      const total = rows.length;
+      const total = rows.filter(entry => entry.deal === currentDeal).length;
       document.getElementById('listing-filter-status').textContent = `${visible} of ${total} apartments`;
       const searchStatus = document.getElementById('table-search-status');
       if (searchStatus && !ownersView) searchStatus.textContent = `${visible} of ${total} shown`;
@@ -287,6 +308,15 @@
         applyDistrict(currentDistrict);
       });
     });
+    document.querySelectorAll('.deal-filter').forEach(button => {
+      button.addEventListener('click', () => {
+        currentDeal = button.dataset.deal;
+        try { localStorage.setItem(dealStorageKey, currentDeal); } catch {}
+        rowCache = null;
+        applyDistrict(currentDistrict);
+      });
+    });
+    document.getElementById('deal-filters').hidden = ownersView || teamView;
     document.getElementById('type-filters').hidden = ownersView || teamView;
     cachedRows();
     document.getElementById('listing-options-bar').hidden = ownersView || teamView;
@@ -408,7 +438,7 @@
       managementNav.querySelectorAll('[data-management-role]').forEach(item => { item.hidden = false; });
       managementNav.querySelectorAll('a[data-view]').forEach(link => { link.href = 'http://localhost:3000/?view=' + link.dataset.view; });
       managementNav.querySelectorAll('button, .copy-accepted-group').forEach(element => { element.hidden = true; });
-      document.querySelectorAll('.type-filters button, .district-filters button, .listing-options-bar button, .listing-options-bar select').forEach(input => { input.disabled = true; });
+      document.querySelectorAll('.deal-filters button, .type-filters button, .district-filters button, .listing-options-bar button, .listing-options-bar select').forEach(input => { input.disabled = true; });
     } else {
       fetchWatcherConfig().then(showWatcherConfig).catch(showConnectionProblem);
     }

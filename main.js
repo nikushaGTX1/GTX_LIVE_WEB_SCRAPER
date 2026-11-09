@@ -720,7 +720,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
         ? `<span class="website-upload error" title="${html(item._api_error)}">Retrying</span>`
         : '<span class="website-upload pending">Pending</span>';
     const waitingForReview = item._review_status !== 'accepted';
-    const apartmentRow = `<tr data-apartment-id="${html(item.apartment_id)}" data-review-comment="${html(item._review_comment || '')}" data-apartment-source="${html(item.source)}" data-district="${html(item.district || 'Other')}" data-property-type="${html(propertyTypeOf(item))}" class="apartment-row ${item._review_status === 'accepted' ? 'review-accepted' : ''}">
+    const apartmentRow = `<tr data-apartment-id="${html(item.apartment_id)}" data-review-comment="${html(item._review_comment || '')}" data-apartment-source="${html(item.source)}" data-district="${html(item.district || 'Other')}" data-property-type="${html(propertyTypeOf(item))}" data-deal-type="${html(dealTypeOf(item))}" class="apartment-row ${item._review_status === 'accepted' ? 'review-accepted' : ''}">
       ${canSelectTransfer ? `<td class="transfer-select-cell">${waitingForReview ? `<input class="transfer-apartment-checkbox" type="checkbox" aria-label="Select waiting apartment ${html(item.apartment_id)} for transfer">` : ''}</td>` : ''}
       <td class="review-cell">
         <div class="review-buttons">
@@ -1401,6 +1401,8 @@ function startWebServer() {
         const fallbackDistrict = clean(body.district) || 'Other';
         const requestedType = clean(body.propertyType).toLowerCase();
         const propertyType = PROPERTY_TYPE_KEYS.has(requestedType) ? requestedType : '';
+        const requestedDeal = clean(body.dealType).toLowerCase();
+        const dealType = DEAL_TYPE_KEYS.has(requestedDeal) ? requestedDeal : '';
         const data = liveMyHomeData || loadData();
         const ssData = liveSsData || loadSsData();
         const permanentKeys = permanentApartmentKeys(data, ssData);
@@ -1420,6 +1422,7 @@ function startWebServer() {
           const district = districtNameFromApiCard(row, fallbackDistrict);
           const item = myHomeApartment(row, id, '', new Date().toISOString(), district);
           if (propertyType) item.property_type = propertyType;
+          if (dealType) item.deal_type = dealType;
           if (belongsToSavedOwner(item, blockedOwners)) {
             item._baseline = true;
             item._excluded = true;
@@ -1874,6 +1877,18 @@ function propertyTypeOf(item) {
   if (PROPERTY_TYPE_KEYS.has(explicit)) return explicit;
   const text = `${item?.url || ''} ${item?.title || ''}`;
   return PROPERTY_TYPES.find(type => type.pattern.test(text))?.key || 'apartment';
+}
+
+// Rent or sale. Same idea as property_type: an explicit deal_type from the
+// importer wins, otherwise the URL slug / Georgian title decides. The
+// watcher's built-in searches are all rentals, so unknown means rent.
+const DEAL_TYPE_KEYS = new Set(['rent', 'sale']);
+function dealTypeOf(item) {
+  const explicit = clean(item?.deal_type).toLowerCase();
+  if (DEAL_TYPE_KEYS.has(explicit)) return explicit;
+  const text = `${item?.url || ''} ${item?.title || ''}`;
+  if (/iyideba|იყიდება/i.test(text)) return 'sale';
+  return 'rent';
 }
 
 function myHomeUrl(source, id) {

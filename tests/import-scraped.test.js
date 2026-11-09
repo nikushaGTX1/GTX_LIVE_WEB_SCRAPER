@@ -12,7 +12,7 @@ const route = source.slice(
   source.indexOf("    if (pathname === '/api/owners' && request.method === 'GET')")
 );
 
-function run(rows, { role = 'admin', district, propertyType, existingData = {}, rejectedIds = [], ownerRows = [] } = {}) {
+function run(rows, { role = 'admin', district, propertyType, dealType, existingData = {}, rejectedIds = [], ownerRows = [] } = {}) {
   const data = existingData;
   const saves = [];
   let assigned = 0;
@@ -20,7 +20,8 @@ function run(rows, { role = 'admin', district, propertyType, existingData = {}, 
   const context = {
     pathname: '/api/apartments/import-scraped', request: { method: 'POST' },
     viewer: { role, name: 'Tester', email: 't@x.com' },
-    readRequestJson: async () => ({ rows, district, propertyType }),
+    readRequestJson: async () => ({ rows, district, propertyType, dealType }),
+    DEAL_TYPE_KEYS: new Set(['rent', 'sale']),
     PROPERTY_TYPE_KEYS: new Set(['apartment', 'house', 'country', 'commercial', 'land', 'hotel']),
     liveMyHomeData: data, liveSsData: {},
     loadData: () => data, loadSsData: () => ({}),
@@ -100,4 +101,11 @@ test('stores the property type sent by the extension, ignoring unknown types', a
   assert.equal(typed.data['501'].property_type, 'country');
   const unknown = await run([{ id: '502' }], { propertyType: 'castle' });
   assert.equal(unknown.data['502'].property_type, undefined);
+});
+
+test('stores the rent/sale deal type sent by the extension', async () => {
+  const sale = await run([{ id: '601' }], { dealType: 'sale' });
+  assert.equal(sale.data['601'].deal_type, 'sale');
+  const unknown = await run([{ id: '602' }], { dealType: 'swap' });
+  assert.equal(unknown.data['602'].deal_type, undefined);
 });
