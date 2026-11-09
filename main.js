@@ -34,6 +34,11 @@ const STATE_PATH = path.join(DATA_ROOT, 'watcher-state.json');
 const WATCHER_CONFIG_PATH = path.join(DATA_ROOT, 'watcher-config.json');
 const OWNERS_PATH = path.join(DATA_ROOT, 'owners.json');
 const ADMIN_OWNERS_PATH = path.join(DATA_ROOT, 'owners-admin.json');
+// Owners of apartments published for sale live in their own database, beside
+// the rental one: same row shape and per-account files, "owners-sale-" prefix.
+const ADMIN_SALE_OWNERS_PATH = path.join(DATA_ROOT, 'owners-sale-admin.json');
+const ownerDeal = value => String(value ?? '').trim().toLowerCase() === 'sale' ? 'sale' : 'rent';
+const ownerAccountFilePattern = deal => deal === 'sale' ? /^owners-sale-[a-f0-9]{24}\.json$/i : /^owners-[a-f0-9]{24}\.json$/i;
 // The only persistent exclusion store: apartment IDs a person dismissed with
 // the × button. Nothing else may be written here, so an apartment that merely
 // left All Apartments can be discovered again on a later scan.
@@ -281,9 +286,10 @@ function ownerAccountKey(viewer) {
   return crypto.createHash('sha256').update(identity).digest('hex').slice(0, 24);
 }
 
-function ownersPathFor(viewer) {
-  if (['admin', 'manager'].includes(viewer?.role)) return ADMIN_OWNERS_PATH;
-  return path.join(DATA_ROOT, `owners-${ownerAccountKey(viewer)}.json`);
+function ownersPathFor(viewer, deal = 'rent') {
+  const sale = deal === 'sale';
+  if (['admin', 'manager'].includes(viewer?.role)) return sale ? ADMIN_SALE_OWNERS_PATH : ADMIN_OWNERS_PATH;
+  return path.join(DATA_ROOT, `owners-${sale ? 'sale-' : ''}${ownerAccountKey(viewer)}.json`);
 }
 
 function agentEmail(agent) {
@@ -389,8 +395,8 @@ function ownerRowIndex(rows, incoming) {
   });
 }
 
-function upsertOwnerRow(viewer, incoming) {
-  const data = ownersData(viewer);
+function upsertOwnerRow(viewer, incoming, deal = 'rent') {
+  const data = ownersData(viewer, deal);
   let rowIndex = ownerRowIndex(data.rows, incoming);
   const created = rowIndex < 0;
   if (created) {
@@ -406,7 +412,7 @@ function upsertOwnerRow(viewer, incoming) {
       incoming[columnIndex] || clean(data.rows[rowIndex][columnIndex])
     );
   }
-  fs.writeFileSync(ownersPathFor(viewer), JSON.stringify(data, null, 2), 'utf8');
+  fs.writeFileSync(ownersPathFor(viewer, deal), JSON.stringify(data, null, 2), 'utf8');
   return { created, rowIndex, rowCount: data.rows.length };
 }
 
@@ -453,14 +459,14 @@ function applySpecificDistrictsToOwners(data) {
   return changed;
 }
 
-function ownersData(viewer) {
-  const accountPath = ownersPathFor(viewer);
+function ownersData(viewer, deal = 'rent') {
+  const accountPath = ownersPathFor(viewer, deal);
   let data = normalizedOwnersData(readJsonFile(accountPath));
   if (['admin', 'manager'].includes(viewer?.role)) {
     const agentPaths = fs.readdirSync(DATA_ROOT)
-      .filter(name => /^owners-[a-f0-9]{24}\.json$/i.test(name))
+      .filter(name => ownerAccountFilePattern(deal).test(name))
       .map(name => path.join(DATA_ROOT, name));
-    if (fs.existsSync(OWNERS_PATH)) agentPaths.unshift(OWNERS_PATH);
+    if (deal === 'rent' && fs.existsSync(OWNERS_PATH)) agentPaths.unshift(OWNERS_PATH);
     for (const agentPath of agentPaths) data.rows = mergeOwnerRows(data.rows, normalizedOwnersData(readJsonFile(agentPath)).rows);
   }
   const beforeComments = JSON.stringify(data);
@@ -473,9 +479,10 @@ function ownersData(viewer) {
   return data;
 }
 
-function removeOwnersFromEveryDatabase(ownerId = '') {
-  const paths = [ADMIN_OWNERS_PATH, OWNERS_PATH, ...fs.readdirSync(DATA_ROOT)
-    .filter(name => /^owners-[a-f0-9]{24}\.json$/i.test(name))
+function removeOwnersFromEveryDatabase(ownerId = '', deal = 'rent') {
+  const central = deal === 'sale' ? [ADMIN_SALE_OWNERS_PATH] : [ADMIN_OWNERS_PATH, OWNERS_PATH];
+  const paths = [...central, ...fs.readdirSync(DATA_ROOT)
+    .filter(name => ownerAccountFilePattern(deal).test(name))
     .map(name => path.join(DATA_ROOT, name))];
   for (const ownerPath of new Set(paths)) {
     if (!fs.existsSync(ownerPath)) continue;
@@ -542,8 +549,8 @@ function runOneTimeScrapeHistoryReset(data, ssData, state) {
   return removed;
 }
 
-function ownersDataForSubject(viewer, subject) {
-  if (!subject || ownersPathFor(subject) === ownersPathFor(viewer)) return ownersData(viewer);
+function ownersDataForSubject(viewer, subject, deal = 'rent') {
+  if (!subject || ownersPathFor(subject, deal) === ownersPathFor(viewer, deal)) return ownersData(viewer, deal);
   const agentId = String(subject.agentId || '');
   const assignedListingIds = new Set(
     [...Object.values(readJsonFile(DATA_PATH)), ...Object.values(readJsonFile(SS_DATA_PATH))]
@@ -552,9 +559,9 @@ function ownersDataForSubject(viewer, subject) {
       .map(item => clean(item.apartment_id))
       .filter(Boolean)
   );
-  const central = ownersData(viewer);
+  const central = ownersData(viewer, deal);
   let rows = central.rows.filter(row => assignedListingIds.has(clean(row[0])));
-  const privatePath = ownersPathFor(subject);
+  const privatePath = ownersPathFor(subject, deal);
   if (fs.existsSync(privatePath)) {
     rows = mergeOwnerRows(rows, normalizedOwnersData(readJsonFile(privatePath)).rows);
   }
@@ -593,9 +600,18 @@ function ownerFiltersHtml(districts) {
   </div>`;
 }
 
-function buildOwnersContent(viewer, subject = viewer, whole = false) {
-  const readOnly = whole || ownersPathFor(subject) !== ownersPathFor(viewer);
-  const displayed = whole ? ownersData(WHOLE_OWNERS_VIEWER) : ownersDataForSubject(viewer, subject);
+function buildOwnersContent(viewer, subject = viewer, whole = false, deal = 'rent') {
+  const readOnly = whole || ownersPathFor(subject, deal) !== ownersPathFor(viewer, deal);
+  const displayed = whole ? ownersData(WHOLE_OWNERS_VIEWER, deal) : ownersDataForSubject(viewer, subject, deal);
+  const dealLink = target => {
+    const params = new URLSearchParams({ view: 'owners' });
+    if (whole) params.set('scope', 'all');
+    if (subject !== viewer && subject?.agentId) params.set('agent', subject.agentId);
+    if (target === 'sale') params.set('deal', 'sale');
+    return `/?${params}`;
+  };
+  const dealButton = (key, label, note) => `<a class="deal-filter${deal === key ? ' active' : ''}" data-deal="${key}" href="${html(dealLink(key))}"${deal === key ? ' aria-current="page"' : ''}><span>${label}</span><small>${note}</small></a>`;
+  const dealSwitch = `<nav class="deal-filters owners-deal-switch" aria-label="Rent or sale owners">${dealButton('rent', 'ქირავდება', 'Rent owners')}${dealButton('sale', 'იყიდება', 'Sale owners')}</nav>`;
   const districts = [...new Set(displayed.rows.map(row => clean(row[2])).filter(Boolean))]
     .sort((left, right) => left.localeCompare(right, 'ka', { sensitivity: 'base' }));
   const head = `${displayed.headers.map((header, columnIndex) => {
@@ -604,10 +620,10 @@ function buildOwnersContent(viewer, subject = viewer, whole = false) {
     return `<th>${html(header)}</th>`;
   }).join('')}${readOnly ? '' : '<th class="owner-actions-column">Actions</th>'}`;
   const rows = displayed.rows.map((row, rowIndex) => `<tr data-owner-row="${rowIndex}">${displayed.headers.map((_, columnIndex) => `<td class="owner-cell"${readOnly || columnIndex === OWNER_ADDED_COLUMN ? '' : ' contenteditable="true"'} spellcheck="false" data-owner-index="${rowIndex}" data-owner-column="${columnIndex}"${columnIndex === OWNER_ADDED_COLUMN ? ` data-added="${html(row[columnIndex] ?? '')}"` : ''}>${html(ownerCellText(row, columnIndex))}</td>`).join('')}${readOnly ? '' : `<td class="owner-row-actions"><button class="owner-remove" type="button" data-owner-index="${rowIndex}" aria-label="Remove owner row">Remove</button></td>`}</tr>`).join('\n');
-  return `<section class="owners-panel" aria-labelledby="owners-title">
+  return `${dealSwitch}<section class="owners-panel" data-owners-deal="${deal}" aria-labelledby="owners-title">
     <div class="owners-toolbar">
-      <div><p class="eyebrow">Owner database</p><h2 id="owners-title">${whole ? 'Whole owner database' : readOnly ? `${html(subject.name)}'s Owners` : 'Owners'}</h2><p id="owners-import-status">${displayed.rows.length} saved row(s)</p></div>
-      ${whole ? '<a href="/?view=owners">Back to my owners</a>' : readOnly ? '<a href="/?view=team">Back to Team profiles</a>' : `<div class="owners-actions">
+      <div><p class="eyebrow">Owner database</p><h2 id="owners-title">${whole ? 'Whole owner database' : readOnly ? `${html(subject.name)}'s Owners` : 'Owners'}${deal === 'sale' ? ' · იყიდება' : ''}</h2><p id="owners-import-status">${displayed.rows.length} saved row(s)</p></div>
+      ${whole ? `<a href="/?view=owners${deal === 'sale' ? '&deal=sale' : ''}">Back to my owners</a>` : readOnly ? '<a href="/?view=team">Back to Team profiles</a>' : `<div class="owners-actions">
         <input id="owners-file" type="file" accept=".xlsx,.xls,.csv" hidden>
         <button id="owners-add-row" type="button">Add row</button>
         <button id="owners-import" class="save-button" type="button">Import Excel</button>
@@ -670,7 +686,7 @@ function isListedApartment(item, blockedOwners) {
     !hasExcludedDescription(item.description) && !belongsToSavedOwner(item, blockedOwners);
 }
 
-function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', ownersScope = '') {
+function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', ownersScope = '', ownersDeal = 'rent') {
   const ownerIds = blockedOwnerIds();
   const allVisible = [
     ...Object.values(readJsonFile(DATA_PATH)).map(item => ({ ...item, source: item.source || 'MyHome' })),
@@ -772,11 +788,11 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
     <a href="/?view=${view === 'accepted' ? 'accepted' : 'all'}">Show everyone</a>
   </div>` : '';
   const wholeOwners = view === 'owners' && ownersScope === 'all';
-  const content = view === 'owners' ? buildOwnersContent(viewer, selectedOwner || viewer, wholeOwners) : view === 'team' ? buildTeamContent(allVisible, assignableAgents) : combined.length
+  const content = view === 'owners' ? buildOwnersContent(viewer, selectedOwner || viewer, wholeOwners, ownersDeal) : view === 'team' ? buildTeamContent(allVisible, assignableAgents) : combined.length
     ? `${profileBanner}${acceptedSearch}<table class="results-table"><thead><tr>${canSelectTransfer ? '<th class="transfer-select-heading"><input id="select-all-apartments" type="checkbox" aria-label="Select all visible apartments"></th>' : ''}<th class="review-heading">Review</th><th>Source</th><th>ID</th><th>${view === 'accepted' ? 'Approved' : 'Received'}</th><th>District</th><th>Assigned agent</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th><th>Website</th>${showManagementComments ? '<th>Accepted by</th><th>Comment</th>' : ''}</tr></thead><tbody>${rows}</tbody></table>`
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')
-    .replace('{{LISTING_COUNT}}', String(view === 'owners' ? (wholeOwners ? ownersData(WHOLE_OWNERS_VIEWER) : ownersDataForSubject(viewer, selectedOwner || viewer)).rows.length : view === 'team' ? assignableAgents.length : combined.length))
+    .replace('{{LISTING_COUNT}}', String(view === 'owners' ? (wholeOwners ? ownersData(WHOLE_OWNERS_VIEWER, ownersDeal) : ownersDataForSubject(viewer, selectedOwner || viewer, ownersDeal)).rows.length : view === 'team' ? assignableAgents.length : combined.length))
     .replace('{{LOGGED_IN_AS}}', html(viewer?.name || viewer?.email || process.env.DASHBOARD_DISPLAY_USER || process.env.WEBSITE_API_EMAIL || 'Local viewer'))
     .replace('{{LOGGED_IN_ROLE}}', html(viewer?.role || 'admin'))
     .replace('{{CURRENT_VIEW}}', ['owners', 'accepted', 'team'].includes(view) ? view : 'all')
@@ -1458,7 +1474,7 @@ function startWebServer() {
     }
     if (pathname === '/api/owners' && request.method === 'GET') {
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
-      response.end(JSON.stringify(ownersData(viewer)));
+      response.end(JSON.stringify(ownersData(viewer, ownerDeal(requestUrl.searchParams.get('deal')))));
       return;
     }
     if (pathname === '/api/owners/upsert' && request.method === 'POST') {
@@ -1467,12 +1483,14 @@ function startWebServer() {
         if (!Array.isArray(body.row)) throw new Error('Owner row is required');
         const incoming = OWNER_HEADERS.map((_, index) => clean(body.row[index]).slice(0, 4000));
         if (!incoming[0] && !digitsOnly(incoming[1]) && !incoming[6] && !incoming[7]) throw new Error('Owner ID, phone or listing ID is required');
-        const accountResult = upsertOwnerRow(viewer, incoming);
+        // The extension sends dealType "sale" for apartments it published for sale.
+        const deal = ownerDeal(body.dealType || requestUrl.searchParams.get('deal'));
+        const accountResult = upsertOwnerRow(viewer, incoming, deal);
         const adminViewer = { role: 'admin', email: 'owners-inbox' };
-        const sameDatabase = ownersPathFor(viewer) === ownersPathFor(adminViewer);
-        const adminResult = sameDatabase ? accountResult : upsertOwnerRow(adminViewer, incoming);
+        const sameDatabase = ownersPathFor(viewer, deal) === ownersPathFor(adminViewer, deal);
+        const adminResult = sameDatabase ? accountResult : upsertOwnerRow(adminViewer, incoming, deal);
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-        response.end(JSON.stringify({ ok: true, ...accountResult, adminRowCount: adminResult.rowCount }));
+        response.end(JSON.stringify({ ok: true, ...accountResult, adminRowCount: adminResult.rowCount, deal }));
       } catch (error) {
         response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify({ error: error.message }));
@@ -1484,6 +1502,7 @@ function startWebServer() {
         const body = await readRequestJson(request);
         if (!Array.isArray(body.headers) || !body.headers.length || !Array.isArray(body.rows)) throw new Error('The worksheet is empty');
         if (body.headers.length > 100 || body.rows.length > 50_000) throw new Error('The worksheet is too large');
+        const deal = ownerDeal(requestUrl.searchParams.get('deal'));
         const importedHeaders = body.headers.map(value => clean(value) || 'Column').slice(0, 100);
         const importedAt = new Date().toISOString();
         const importedRows = body.rows.map(row => OWNER_HEADERS.map((header, columnIndex) => {
@@ -1494,10 +1513,10 @@ function startWebServer() {
         }));
         let data = { headers: OWNER_HEADERS, rows: importedRows };
         if (body.append) {
-          const current = ownersData(viewer);
+          const current = ownersData(viewer, deal);
           data = { headers: OWNER_HEADERS, rows: [...importedRows, ...current.rows] };
         }
-        fs.writeFileSync(ownersPathFor(viewer), JSON.stringify(data, null, 2), 'utf8');
+        fs.writeFileSync(ownersPathFor(viewer, deal), JSON.stringify(data, null, 2), 'utf8');
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify({ ok: true, rowCount: data.rows.length }));
       } catch (error) {
@@ -1509,7 +1528,8 @@ function startWebServer() {
     if (pathname === '/api/owners' && request.method === 'PATCH') {
       try {
         const body = await readRequestJson(request);
-        const data = ownersData(viewer);
+        const deal = ownerDeal(requestUrl.searchParams.get('deal'));
+        const data = ownersData(viewer, deal);
         if (body.addRow === true) data.rows.unshift(data.headers.map((_, index) => index === OWNER_ADDED_COLUMN ? new Date().toISOString() : ''));
         else {
           const rowIndex = Number(body.rowIndex);
@@ -1518,7 +1538,7 @@ function startWebServer() {
           if (!Number.isInteger(columnIndex) || columnIndex < 0 || columnIndex >= data.headers.length) throw new Error('Owner column was not found');
           data.rows[rowIndex][columnIndex] = clean(body.value);
         }
-        fs.writeFileSync(ownersPathFor(viewer), JSON.stringify(data, null, 2), 'utf8');
+        fs.writeFileSync(ownersPathFor(viewer, deal), JSON.stringify(data, null, 2), 'utf8');
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify({ ok: true, rowCount: data.rows.length }));
       } catch (error) {
@@ -1529,20 +1549,21 @@ function startWebServer() {
     }
     if (pathname === '/api/owners' && request.method === 'DELETE') {
       try {
-        const data = ownersData(viewer);
+        const deal = ownerDeal(requestUrl.searchParams.get('deal'));
+        const data = ownersData(viewer, deal);
         const management = ['admin', 'manager'].includes(viewer.role);
         if (requestUrl.searchParams.get('all') === 'true') {
           data.rows = [];
-          if (management) removeOwnersFromEveryDatabase();
+          if (management) removeOwnersFromEveryDatabase('', deal);
         }
         else {
           const index = Number(requestUrl.searchParams.get('index'));
           if (!Number.isInteger(index) || index < 0 || index >= data.rows.length) throw new Error('Owner row was not found');
           const ownerId = clean(data.rows[index][0]);
           data.rows.splice(index, 1);
-          if (management && ownerId) removeOwnersFromEveryDatabase(ownerId);
+          if (management && ownerId) removeOwnersFromEveryDatabase(ownerId, deal);
         }
-        fs.writeFileSync(ownersPathFor(viewer), JSON.stringify(data, null, 2), 'utf8');
+        fs.writeFileSync(ownersPathFor(viewer, deal), JSON.stringify(data, null, 2), 'utf8');
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify({ ok: true, rowCount: data.rows.length }));
       } catch (error) {
@@ -1560,7 +1581,7 @@ function startWebServer() {
         new Promise(resolve=>setTimeout(resolve,4000))
       ]);
       response.writeHead(200, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store, max-age=0' });
-      response.end(buildDashboard(viewer, allowedView, clean(requestUrl.searchParams.get('agent')), clean(requestUrl.searchParams.get('scope'))));
+      response.end(buildDashboard(viewer, allowedView, clean(requestUrl.searchParams.get('agent')), clean(requestUrl.searchParams.get('scope')), ownerDeal(requestUrl.searchParams.get('deal'))));
       return;
     }
     const reviewMatch = pathname.match(/^\/api\/apartments\/(\d+)\/review$/);

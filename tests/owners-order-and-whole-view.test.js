@@ -43,8 +43,8 @@ test('the date column is read-only in the table', () => {
 
 test('every account can open the whole owner database read-only', () => {
   assert.match(source, /const WHOLE_OWNERS_VIEWER = \{ role: 'admin', email: 'owners-inbox' \}/);
-  assert.match(source, /const readOnly = whole \|\| ownersPathFor\(subject\) !== ownersPathFor\(viewer\)/);
-  assert.match(source, /whole \? ownersData\(WHOLE_OWNERS_VIEWER\)/);
+  assert.match(source, /const readOnly = whole \|\| ownersPathFor\(subject, deal\) !== ownersPathFor\(viewer, deal\)/);
+  assert.match(source, /whole \? ownersData\(WHOLE_OWNERS_VIEWER, deal\)/);
   assert.match(source, /clean\(requestUrl\.searchParams\.get\('scope'\)\)/);
   // No role check gates scope=all: the route only restricts the team view.
   assert.doesNotMatch(source, /scope'\)[^\n]*role/);

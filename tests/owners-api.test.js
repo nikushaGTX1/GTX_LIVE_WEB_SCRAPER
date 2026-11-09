@@ -22,9 +22,9 @@ test('Owners endpoint merges later platform IDs into the same owner row', () => 
 
 test('extension owner uploads feed the authenticated agent and central Administrator databases', () => {
   assert.match(source, /const ADMIN_OWNERS_PATH = path\.join\(DATA_ROOT, 'owners-admin\.json'\)/);
-  assert.match(source, /const accountResult = upsertOwnerRow\(viewer, incoming\)/);
+  assert.match(source, /const accountResult = upsertOwnerRow\(viewer, incoming, deal\)/);
   assert.match(source, /const adminViewer = \{ role: 'admin', email: 'owners-inbox' \}/);
-  assert.match(source, /sameDatabase \? accountResult : upsertOwnerRow\(adminViewer, incoming\)/);
+  assert.match(source, /sameDatabase \? accountResult : upsertOwnerRow\(adminViewer, incoming, deal\)/);
   assert.match(source, /\^owners-\[a-f0-9\]\{24\}\\\.json\$/i);
   assert.match(source, /data\.rows = mergeOwnerRows\(data\.rows, normalizedOwnersData\(readJsonFile\(agentPath\)\)\.rows\)/);
 });
@@ -49,15 +49,15 @@ test('owner rows use a saved apartment neighbourhood instead of a combined admin
 });
 
 test('managers share the complete owner database and team profiles link to each agent owners', () => {
-  assert.match(source, /\['admin', 'manager'\]\.includes\(viewer\?\.role\)\) return ADMIN_OWNERS_PATH/);
+  assert.match(source, /\['admin', 'manager'\]\.includes\(viewer\?\.role\)\) return sale \? ADMIN_SALE_OWNERS_PATH : ADMIN_OWNERS_PATH/);
   assert.match(source, /view=owners&agent=\$\{encodeURIComponent\(agent\.id\)\}/);
-  assert.match(source, /buildOwnersContent\(viewer, selectedOwner \|\| viewer, wholeOwners\)/);
-  assert.match(source, /function ownersDataForSubject\(viewer, subject\)/);
+  assert.match(source, /buildOwnersContent\(viewer, selectedOwner \|\| viewer, wholeOwners, ownersDeal\)/);
+  assert.match(source, /function ownersDataForSubject\(viewer, subject, deal = 'rent'\)/);
   assert.match(source, /String\(item\.assigned_agent_id \|\| ''\) === agentId/);
   assert.match(source, /central\.rows\.filter\(row => assignedListingIds\.has\(clean\(row\[0\]\)\)\)/);
   assert.match(source, /\['admin', 'manager'\]\.includes\(viewer\?\.role\)/);
   assert.match(source, /data\.rows = mergeOwnerRows\(data\.rows, normalizedOwnersData\(readJsonFile\(agentPath\)\)\.rows\)/);
-  assert.match(source, /function removeOwnersFromEveryDatabase\(ownerId = ''\)/);
+  assert.match(source, /function removeOwnersFromEveryDatabase\(ownerId = '', deal = 'rent'\)/);
 });
 
 test('removed queue apartments are deleted from the live queue', () => {

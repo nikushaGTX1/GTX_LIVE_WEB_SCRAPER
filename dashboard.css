@@ -929,3 +929,5 @@ button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity:
 @media (max-width: 640px) {
   .deal-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
+.owners-deal-switch { margin-bottom: 14px; }
+.owners-deal-switch .deal-filter { text-decoration: none; }

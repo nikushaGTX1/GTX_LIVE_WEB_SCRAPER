@@ -142,6 +142,8 @@
     if (managementNav.dataset.currentView.includes('{{CURRENT_VIEW}}')) managementNav.dataset.currentView = 'all';
     managementNav.querySelectorAll('a').forEach(link => link.classList.toggle('active', link.dataset.view === managementNav.dataset.currentView));
     const ownersView = managementNav.dataset.currentView === 'owners';
+    // Rent and sale owners are separate databases; every Owners call names one.
+    const ownersApi = `/api/owners?deal=${document.querySelector('.owners-panel')?.dataset.ownersDeal === 'sale' ? 'sale' : 'rent'}`;
     const viewTitles = { all: 'Live apartments', accepted: 'Ready for upload', owners: 'Owners', team: 'Team profiles' };
     document.querySelector('h1').textContent = viewTitles[managementNav.dataset.currentView] || viewTitles.all;
     document.title = 'Velven Live | ' + ({ all: 'Apartments', accepted: 'Ready For Upload', owners: 'Owners', team: 'Team' }[managementNav.dataset.currentView] || 'Apartments');
@@ -228,7 +230,7 @@
       }));
       const dealCounts = { rent: 0, sale: 0 };
       rowCache.forEach(entry => { dealCounts[entry.deal] += 1; });
-      document.querySelectorAll('.deal-filter').forEach(button => {
+      document.querySelectorAll('#deal-filters .deal-filter').forEach(button => {
         button.querySelector('.deal-count').textContent = dealCounts[button.dataset.deal] || 0;
       });
       const counts = { all: 0 };
@@ -261,7 +263,7 @@
         item.classList.toggle('active', item.dataset.type === currentType);
         item.setAttribute('aria-pressed', item.dataset.type === currentType ? 'true' : 'false');
       });
-      document.querySelectorAll('.deal-filter').forEach(item => {
+      document.querySelectorAll('#deal-filters .deal-filter').forEach(item => {
         item.classList.toggle('active', item.dataset.deal === currentDeal);
         item.setAttribute('aria-pressed', item.dataset.deal === currentDeal ? 'true' : 'false');
       });
@@ -308,7 +310,7 @@
         applyDistrict(currentDistrict);
       });
     });
-    document.querySelectorAll('.deal-filter').forEach(button => {
+    document.querySelectorAll('#deal-filters .deal-filter').forEach(button => {
       button.addEventListener('click', () => {
         currentDeal = button.dataset.deal;
         try { localStorage.setItem(dealStorageKey, currentDeal); } catch {}
@@ -618,7 +620,7 @@
         if (nonEmpty.length < 2) throw new Error('The first worksheet needs a header row and at least one data row.');
         const headers = nonEmpty[0].map((cell, index) => String(cell).trim() || `Column ${index + 1}`);
         const rows = nonEmpty.slice(1).map(row => headers.map((_, index) => row[index] ?? ''));
-        const response = await fetch('/api/owners', {
+        const response = await fetch(ownersApi, {
           method: 'POST', headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ headers, rows, append: appendOwners })
         });
@@ -632,7 +634,7 @@
       }
     });
     const removeOwnerRows = async query => {
-      const response = await fetch(`/api/owners?${query}`, { method: 'DELETE' });
+      const response = await fetch(`${ownersApi}&${query}`, { method: 'DELETE' });
       const result = await response.json();
       if (!response.ok) throw new Error(result.error || 'Could not remove owner data');
       location.reload();
@@ -652,7 +654,7 @@
       const value = cell.textContent.trim();
       if (value === cell.dataset.savedValue) return;
       cell.classList.add('saving');
-      const response = await fetch('/api/owners', {
+      const response = await fetch(ownersApi, {
         method: 'PATCH', headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ rowIndex: Number(cell.dataset.ownerIndex), columnIndex: Number(cell.dataset.ownerColumn), value })
       });
@@ -839,7 +841,7 @@
     document.getElementById('owners-add-row')?.addEventListener('click', async event => {
       event.currentTarget.disabled = true;
       try {
-        const response = await fetch('/api/owners', {
+        const response = await fetch(ownersApi, {
           method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ addRow: true })
         });
         const result = await response.json();
