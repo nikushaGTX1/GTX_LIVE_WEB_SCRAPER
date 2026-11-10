@@ -577,12 +577,18 @@ function ownerCellText(row, columnIndex) {
 }
 
 // Selected options stay in the comment so every existing export preserves them.
-function propertyOptionsHtml(comment = '') {
-  return `<fieldset class="property-options"><legend>Property options</legend>${['Pet friendly', '50% commission', 'Furnished', 'Short-term rental', 'Indians allowed'].map(label => `<label class="option-chip"><input type="checkbox" value="${label}"${comment.includes('[' + label + ']') ? ' checked' : ''}><span>${label}</span></label>`).join('')}<small>Included in Owners and copied upload links.</small></fieldset>`;
+// Checkbox tags saved into the review comment as "[label]". Rentals and sales
+// need different ones: nobody asks if a flat for sale is pet friendly.
+const RENT_PROPERTY_OPTIONS = ['Pet friendly', '50% commission', 'Furnished', 'Short-term rental', 'Indians allowed'];
+const SALE_PROPERTY_OPTIONS = ['თეთრი კარკასი', 'შავი კარკასი', 'მწვანე კარკასი', 'ახალი გარემონტებული', 'ძველი რემონტით', 'სარემონტო', 'ახალი აშენებული', 'იპოთეკით', 'განვადებით', 'გაცვლა', 'ფასი შეთანხმებით', '50% commission'];
+const propertyOptionsFor = deal => deal === 'sale' ? SALE_PROPERTY_OPTIONS : RENT_PROPERTY_OPTIONS;
+
+function propertyOptionsHtml(comment = '', deal = 'rent') {
+  return `<fieldset class="property-options"><legend>Property options</legend>${propertyOptionsFor(deal).map(label => `<label class="option-chip"><input type="checkbox" value="${label}"${comment.includes('[' + label + ']') ? ' checked' : ''}><span>${label}</span></label>`).join('')}<small>Included in Owners and copied upload links.</small></fieldset>`;
 }
 
 // Filter bar rules run in dashboard.html against each owner row.
-function ownerFiltersHtml(districts) {
+function ownerFiltersHtml(districts, deal = 'rent') {
   const options = list => list.map(([value, label]) => `<option value="${html(value)}">${html(label)}</option>`).join('');
   const select = (id, icon, label, list) => `<label class="owner-filter-field" for="${id}"><span class="owner-filter-label"><svg class="ui-icon" aria-hidden="true"><use href="#icon-${id.replace('owner-filter-', '')}"></use></svg>${html(label)}</span><select id="${id}">${options(list)}</select></label>`;
   const range = (id, icon, label, unit) => `<div class="owner-filter-field"><span class="owner-filter-label"><svg class="ui-icon" aria-hidden="true"><use href="#icon-${id.replace('owner-filter-', '')}"></use></svg>${html(label)}</span><span class="owner-filter-range"><input id="${id}-min" type="number" min="0" inputmode="decimal" placeholder="Min"><span aria-hidden="true">–</span><input id="${id}-max" type="number" min="0" inputmode="decimal" placeholder="Max">${unit ? `<small>${html(unit)}</small>` : ''}</span></div>`;
@@ -595,7 +601,7 @@ function ownerFiltersHtml(districts) {
     ${range('owner-filter-price', '💰', 'Price', '')}
     ${select('owner-filter-currency', '💱', 'Currency', [['', 'Any'], ['$', '$ USD'], ['₾', '₾ GEL']])}
     ${select('owner-filter-added', '🗓️', 'Added', [['', 'Any time'], ['today', 'Today'], ['7', 'Last 7 days'], ['30', 'Last 30 days']])}
-    ${select('owner-filter-option', '&#10003;', 'Property option', [['', 'Any option'], ['Pet friendly', 'Pet friendly'], ['50% commission', '50% commission'], ['Furnished', 'Furnished'], ['Short-term rental', 'Short-term rental'], ['Indians allowed', 'Indians allowed']])}
+    ${select('owner-filter-option', '&#10003;', 'Property option', [['', 'Any option'], ...propertyOptionsFor(deal).map(label => [label, label])])}
     ${select('owner-filter-comment', '💬', 'Agreement note', [['', 'Any'], ['with', 'Has a note'], ['without', 'No note']])}
     <button id="owner-filter-reset" class="owner-filter-reset" type="button" disabled><span aria-hidden="true">↺</span> Reset filters</button>
   </div>`;
@@ -658,7 +664,7 @@ function buildOwnersContent(viewer, subject = viewer, whole = false, deal = 'ren
       <input id="table-search-input" type="search" placeholder="Search any owner field..." autocomplete="off" data-search-table=".owners-table" data-search-rows="tbody tr">
       <span id="table-search-status" aria-live="polite"></span>
     </div>
-    ${ownerFiltersHtml(districts)}
+    ${ownerFiltersHtml(districts, deal)}
     <div class="owners-table-wrap"><table class="owners-table"><thead><tr>${head}</tr></thead><tbody>${rows}</tbody></table></div>
   </section>`;
 }
@@ -769,7 +775,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
       <td><span class="source ${item.source === 'SS.ge' ? 'ss' : ''}">${html(item.source)}</span></td>
       <td>${html(item.apartment_id)}</td>
       <td title="${html(displayedAt || '')}">${html(dashboardDateTime(displayedAt))}</td>
-      <td>${html(item.district || 'Other')}<div class="property-badges">${['Pet friendly', '50% commission', 'Furnished', 'Short-term rental', 'Indians allowed'].filter(label => (item._review_comment || '').includes('[' + label + ']')).map(label => `<span>${html(label)}</span>`).join('')}</div></td>
+      <td>${html(item.district || 'Other')}<div class="property-badges">${propertyOptionsFor(dealTypeOf(item)).filter(label => (item._review_comment || '').includes('[' + label + ']')).map(label => `<span>${html(label)}</span>`).join('')}</div></td>
       <td>${canReassign ? `<select class="agent-reassign" aria-label="Reassign apartment ${html(item.apartment_id)}"><option value="">Unassigned</option>${assignmentOptions(item)}</select>` : html(item.assigned_agent_name || item.assigned_agent_id || 'Pending')}</td>
       <td>${html(item.rooms || '—')}</td>
       <td>${html(item.bedrooms || '—')}</td>
@@ -779,7 +785,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
       <td class="${item.phone ? '' : 'masked-phone'}">${html(item.phone || item._masked_phone || '—')}</td>
       <td><a class="listing-link" href="${html(item.url)}" target="_blank" rel="noopener noreferrer">Open listing ↗</a></td>
       <td>${websiteStatus}</td>
-      ${showManagementComments ? `<td class="accepted-agent"><strong>${html(item._reviewed_by || 'Unknown agent')}</strong><small>${item._reviewed_at ? html(item._reviewed_at) : ''}</small></td><td class="management-comment"><p class="accepted-note">${html(item._review_comment || '')}</p><details class="accepted-review-details"><summary>Edit comment &amp; options</summary><div class="accepted-comment-edit"><textarea class="accepted-comment-editor" maxlength="2000" aria-label="Apartment comment">${html(item._review_comment || '')}</textarea>${propertyOptionsHtml(item._review_comment || '')}<button class="update-comment" type="button">Save comment</button></div></details></td>` : ''}
+      ${showManagementComments ? `<td class="accepted-agent"><strong>${html(item._reviewed_by || 'Unknown agent')}</strong><small>${item._reviewed_at ? html(item._reviewed_at) : ''}</small></td><td class="management-comment"><p class="accepted-note">${html(item._review_comment || '')}</p><details class="accepted-review-details"><summary>Edit comment &amp; options</summary><div class="accepted-comment-edit"><textarea class="accepted-comment-editor" maxlength="2000" aria-label="Apartment comment">${html(item._review_comment || '')}</textarea>${propertyOptionsHtml(item._review_comment || '', dealTypeOf(item))}<button class="update-comment" type="button">Save comment</button></div></details></td>` : ''}
     </tr>`;
     if (view === 'accepted') return apartmentRow;
     const columnCount = (showManagementComments ? 16 : 14) + (canSelectTransfer ? 1 : 0);
@@ -789,7 +795,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
           <label class="review-comment-label">Comment
             <textarea class="review-comment" maxlength="2000" placeholder="Add a comment before moving this apartment to Ready For Upload" required>${html(item._review_comment || '')}</textarea>
           </label>
-          ${propertyOptionsHtml(item._review_comment || '')}
+          ${propertyOptionsHtml(item._review_comment || '', dealTypeOf(item))}
           ${dealTypeOf(item) === 'sale' ? `<label class="sale-markup-label">რამდენს ამატებ მესაკუთრის ფასზე? <small>მესაკუთრის ფასი: ${html(item.price || '—')}</small>
             <input class="sale-markup" type="number" min="0" step="any" inputmode="decimal" placeholder="მაგ. 2000" data-owner-price="${positiveNumber(item.price) || ''}" value="${item._sale_markup ?? ''}">
             <output class="sale-price-preview"></output>

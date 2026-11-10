@@ -71,5 +71,5 @@ test('owners view renders the filter bar and the date cell carries its raw date'
   }
   assert.match(source, /owner-filter-reset/);
   assert.match(source, /data-added=/);
-  assert.match(source, /\$\{ownerFiltersHtml\(districts\)\}/);
+  assert.match(source, /\$\{ownerFiltersHtml\(districts, deal\)\}/);
 });

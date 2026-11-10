@@ -23,24 +23,31 @@ test('review options travel in the saved comment without duplication', () => {
 });
 
 test('saved options hydrate the review editor', () => {
-  const start = source.indexOf('function propertyOptionsHtml(');
-  const end = source.indexOf('\nfunction ', start + 1);
+  const start = source.indexOf('const RENT_PROPERTY_OPTIONS');
+  const end = source.indexOf('\nfunction ', source.indexOf('function propertyOptionsHtml('));
   const context = {};
-  vm.runInNewContext(source.slice(start, end), context);
+  vm.runInNewContext(source.slice(start, end) + '; this.propertyOptionsHtml = propertyOptionsHtml;', context);
   const rendered = context.propertyOptionsHtml('Confirmed [Pet friendly] [50% commission] [Indians allowed]');
   assert.match(rendered, /value="Pet friendly" checked/);
   assert.match(rendered, /value="50% commission" checked/);
   assert.match(rendered, /value="Indians allowed" checked/);
   assert.doesNotMatch(rendered, /value="Furnished" checked/);
+  const sale = context.propertyOptionsHtml('[თეთრი კარკასი]', 'sale');
+  assert.match(sale, /value="თეთრი კარკასი" checked/);
+  assert.doesNotMatch(sale, /Pet friendly|Indians allowed|Short-term rental/);
 });
 
-test('Indians allowed is a selectable option everywhere the option list appears', () => {
-  assert.match(template, /<option>Indians allowed<\/option>/);
-  assert.match(template, /optionLabels = \[.*'Indians allowed'\]/);
-  assert.match(source, /'Short-term rental', 'Indians allowed'\]\.map/);
-  assert.match(source, /'Short-term rental', 'Indians allowed'\]\.filter/);
-  assert.match(source, /\['Indians allowed', 'Indians allowed'\]/);
+test('rent and sale each offer their own options everywhere the option list appears', () => {
+  assert.match(template, /<option data-deal="rent">Indians allowed<\/option>/);
+  assert.match(template, /<option data-deal="sale">თეთრი კარკასი<\/option>/);
+  assert.match(template, /optionLabels = \[.*'Indians allowed'.*'თეთრი კარკასი'/);
+  assert.match(source, /const RENT_PROPERTY_OPTIONS = \[.*'Indians allowed'\]/);
+  assert.match(source, /const SALE_PROPERTY_OPTIONS = \[.*'თეთრი კარკასი'/);
+  assert.match(source, /propertyOptionsFor\(dealTypeOf\(item\)\)\.filter/);
+  assert.match(source, /propertyOptionsFor\(deal\)\.map\(label => \[label, label\]\)/);
 });
+
+
 
 test('accepted comments and options reach matching Owners without touching unrelated rows', () => {
   const start = source.indexOf('function applyAcceptedCommentsToOwners(');
