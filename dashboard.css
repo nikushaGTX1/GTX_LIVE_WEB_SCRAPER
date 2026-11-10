@@ -955,7 +955,7 @@ button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity:
 .owners-table th:nth-child(8) { width: 8%; }
 .owners-table th:nth-child(9) { width: auto; }
 .owners-table th:nth-child(10) { width: 9%; }
-.owners-table .owner-actions-column, .owners-table .owner-row-actions { width: 86px; white-space: nowrap; min-width: 0; padding-left: 4px; padding-right: 8px; }
+.owners-table .owner-actions-column, .owners-table .owner-row-actions { width: 104px; white-space: nowrap; min-width: 0; padding-left: 4px; padding-right: 8px; }
 .owners-table tbody tr { transition: background-color 120ms ease; }
 .owners-table tbody tr:nth-child(even) td { background: #fbfafd; }
 .owners-table tbody tr:hover td { background: #f4f0fb; }
@@ -981,3 +981,10 @@ button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity:
   .owners-table td[data-owner-column="8"] { grid-column: 1 / -1; }
   .owners-table .owner-row-actions { grid-column: 1 / -1; text-align: right; }
 }
+
+.owners-table .owner-row-actions { display: table-cell; }
+.owner-move { display: block; width: 100%; margin-bottom: 5px; padding: 5px 6px; border: 1px solid #b6dcd6; border-radius: 8px; background: #effaf8; color: #0f766e; cursor: pointer; font: inherit; font-size: 11px; font-weight: 700; white-space: nowrap; }
+.owner-move:hover { background: #0f766e; color: #fff; }
+.owner-row-actions .owner-remove { width: 100%; }
+.owners-actions #owners-move-sale { border: 1px solid #b6dcd6; background: #effaf8; color: #0f766e; }
+@media (max-width: 1100px) { .owners-table .owner-row-actions { display: flex; justify-content: flex-end; gap: 8px; } .owner-move, .owner-row-actions .owner-remove { width: auto; margin: 0; } }

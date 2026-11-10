@@ -69,3 +69,13 @@ test('accepted apartment comments synchronize to matching owner listing IDs', ()
   assert.doesNotMatch(source, /acceptedComments\.get\(clean\(row\[(?:6|7)\]\)\)/);
   assert.match(source, /row\[8\] = comment/);
 });
+
+test('rent owner rows that are really sales are caught and can be moved', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.match(main, /if \(deal === 'rent' && ownerRowLooksSale\(incoming\)\) deal = 'sale'/);
+  assert.match(main, /price >= 40000 : price >= 15000/);
+  assert.match(main, /pathname === '\/api\/owners\/move'/);
+  assert.match(main, /class="owner-move"/);
+});

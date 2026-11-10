@@ -395,6 +395,43 @@ function ownerRowIndex(rows, incoming) {
   });
 }
 
+// A row the extension sent as rent can still be a sale: older extension
+// copies had no sale detection. A Tbilisi rental never costs 15,000 $ (or
+// 40,000 ₾) a month, and a scraped dashboard listing with the same ID knows
+// its own deal type.
+function ownerRowLooksSale(row) {
+  const ids = [0, 6, 7].map(index => clean(row[index])).filter(Boolean);
+  if (ids.length) {
+    for (const item of [...Object.values(liveMyHomeData || {}), ...Object.values(liveSsData || {})]) {
+      const itemIds = [clean(item.apartment_id), ...(String(item.url || '').match(/\d{5,}/g) || [])];
+      if (ids.some(id => itemIds.includes(id))) return dealTypeOf(item) === 'sale';
+    }
+  }
+  const priceText = clean(row[5]);
+  const price = positiveNumber(priceText);
+  if (!price) return false;
+  return /₾|ლარ|gel/i.test(priceText) ? price >= 40000 : price >= 15000;
+}
+
+// Moves owner rows between the rent and sale databases of this account (and,
+// for management, out of every account's database of the old deal).
+function moveOwnerRows(viewer, from, rowIndexes) {
+  const to = from === 'sale' ? 'rent' : 'sale';
+  const data = ownersData(viewer, from);
+  const picked = [...new Set(rowIndexes)].filter(index => Number.isInteger(index) && index >= 0 && index < data.rows.length).sort((a, b) => b - a);
+  const management = ['admin', 'manager'].includes(viewer.role);
+  const adminViewer = { role: 'admin', email: 'owners-inbox' };
+  const moved = [];
+  for (const index of picked) moved.push(...data.rows.splice(index, 1));
+  fs.writeFileSync(ownersPathFor(viewer, from), JSON.stringify(data, null, 2), 'utf8');
+  for (const row of moved.reverse()) {
+    upsertOwnerRow(viewer, [...row], to);
+    if (management && ownersPathFor(viewer, to) !== ownersPathFor(adminViewer, to)) upsertOwnerRow(adminViewer, [...row], to);
+    if (management && clean(row[0])) removeOwnersFromEveryDatabase(clean(row[0]), from);
+  }
+  return { moved: moved.length, to, rowCount: data.rows.length };
+}
+
 function upsertOwnerRow(viewer, incoming, deal = 'rent') {
   const data = ownersData(viewer, deal);
   let rowIndex = ownerRowIndex(data.rows, incoming);
@@ -647,7 +684,7 @@ function buildOwnersContent(viewer, subject = viewer, whole = false, deal = 'ren
     return `<th>${html(header)}</th>`;
   }).join('')}${readOnly ? '' : '<th class="owner-actions-column">Actions</th>'}`;
   const rowTypes = ownerRowTypes(displayed.rows, items);
-  const rows = displayed.rows.map((row, rowIndex) => `<tr data-owner-row="${rowIndex}" data-property-type="${rowTypes[rowIndex]}">${displayed.headers.map((_, columnIndex) => `<td class="owner-cell"${readOnly || columnIndex === OWNER_ADDED_COLUMN ? '' : ' contenteditable="true"'} spellcheck="false" data-label="${html(displayed.headers[columnIndex])}" data-owner-index="${rowIndex}" data-owner-column="${columnIndex}"${columnIndex === OWNER_ADDED_COLUMN ? ` data-added="${html(row[columnIndex] ?? '')}"` : ''}>${html(ownerCellText(row, columnIndex))}</td>`).join('')}${readOnly ? '' : `<td class="owner-row-actions"><button class="owner-remove" type="button" data-owner-index="${rowIndex}" aria-label="Remove owner row">Remove</button></td>`}</tr>`).join('\n');
+  const rows = displayed.rows.map((row, rowIndex) => `<tr data-owner-row="${rowIndex}" data-property-type="${rowTypes[rowIndex]}">${displayed.headers.map((_, columnIndex) => `<td class="owner-cell"${readOnly || columnIndex === OWNER_ADDED_COLUMN ? '' : ' contenteditable="true"'} spellcheck="false" data-label="${html(displayed.headers[columnIndex])}" data-owner-index="${rowIndex}" data-owner-column="${columnIndex}"${columnIndex === OWNER_ADDED_COLUMN ? ` data-added="${html(row[columnIndex] ?? '')}"` : ''}>${html(ownerCellText(row, columnIndex))}</td>`).join('')}${readOnly ? '' : `<td class="owner-row-actions"><button class="owner-move" type="button" data-owner-index="${rowIndex}" title="${deal === 'sale' ? 'Move to rent owners' : 'Move to sale owners'}">${deal === 'sale' ? '→ ქირა' : '→ იყიდება'}</button><button class="owner-remove" type="button" data-owner-index="${rowIndex}" aria-label="Remove owner row">Remove</button></td>`}</tr>`).join('\n');
   return `${dealSwitch}<section class="owners-panel" data-owners-deal="${deal}" aria-labelledby="owners-title">
     <div class="owners-toolbar">
       <div><p class="eyebrow">Owner database</p><h2 id="owners-title">${whole ? 'Whole owner database' : readOnly ? `${html(subject.name)}'s Owners` : 'Owners'}${deal === 'sale' ? ' · იყიდება' : ''}</h2><p id="owners-import-status">${displayed.rows.length} saved row(s)</p></div>
@@ -656,6 +693,7 @@ function buildOwnersContent(viewer, subject = viewer, whole = false, deal = 'ren
         <button id="owners-add-row" type="button">Add row</button>
         <button id="owners-import" class="save-button" type="button">Import Excel</button>
         <button id="owners-append" type="button">Append Excel</button>
+        ${deal === 'rent' ? '<button id="owners-move-sale" type="button" title="Moves rows priced 15,000 $ / 40,000 ₾ or more, or whose listing is for sale">Move sale rows → იყიდება</button>' : ''}
         <button id="owners-remove-all" type="button">Remove all</button>
       </div>`}
     </div>
@@ -1531,13 +1569,31 @@ function startWebServer() {
         const incoming = OWNER_HEADERS.map((_, index) => clean(body.row[index]).slice(0, 4000));
         if (!incoming[0] && !digitsOnly(incoming[1]) && !incoming[6] && !incoming[7]) throw new Error('Owner ID, phone or listing ID is required');
         // The extension sends dealType "sale" for apartments it published for sale.
-        const deal = ownerDeal(body.dealType || requestUrl.searchParams.get('deal'));
+        let deal = ownerDeal(body.dealType || requestUrl.searchParams.get('deal'));
+        if (deal === 'rent' && ownerRowLooksSale(incoming)) deal = 'sale';
         const accountResult = upsertOwnerRow(viewer, incoming, deal);
         const adminViewer = { role: 'admin', email: 'owners-inbox' };
         const sameDatabase = ownersPathFor(viewer, deal) === ownersPathFor(adminViewer, deal);
         const adminResult = sameDatabase ? accountResult : upsertOwnerRow(adminViewer, incoming, deal);
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify({ ok: true, ...accountResult, adminRowCount: adminResult.rowCount, deal }));
+      } catch (error) {
+        response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ error: error.message }));
+      }
+      return;
+    }
+    if (pathname === '/api/owners/move' && request.method === 'POST') {
+      try {
+        const body = await readRequestJson(request);
+        const from = ownerDeal(requestUrl.searchParams.get('deal'));
+        const current = ownersData(viewer, from);
+        const indexes = body.auto === true
+          ? current.rows.map((row, index) => (from === 'rent' ? ownerRowLooksSale(row) : !ownerRowLooksSale(row)) ? index : -1).filter(index => index >= 0)
+          : (Array.isArray(body.indexes) ? body.indexes : [body.index]).map(Number);
+        const result = moveOwnerRows(viewer, from, indexes);
+        response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
+        response.end(JSON.stringify({ ok: true, ...result }));
       } catch (error) {
         response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify({ error: error.message }));

@@ -647,7 +647,33 @@
       if (!confirm('Remove every row from your Owners database? This cannot be undone.')) return;
       removeOwnerRows('all=true').catch(error => alert(error.message));
     });
+    const moveOwnerRowsTo = async body => {
+      const response = await fetch(ownersApi.replace('/api/owners', '/api/owners/move'), {
+        method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body)
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || 'Could not move owner rows');
+      return result;
+    };
+    document.getElementById('owners-move-sale')?.addEventListener('click', async event => {
+      const button = event.currentTarget;
+      if (!confirm('Move every rent row that is really a sale (price 15,000 $ / 40,000 ₾ or more, or its listing is for sale) to the sale Owners?')) return;
+      button.disabled = true;
+      try {
+        const result = await moveOwnerRowsTo({ auto: true });
+        alert(result.moved ? `Moved ${result.moved} row(s) to იყიდება.` : 'No sale rows were found in rent owners.');
+        location.reload();
+      } catch (error) { button.disabled = false; alert(error.message); }
+    });
     document.querySelector('.owners-table')?.addEventListener('click', event => {
+      const move = event.target.closest('.owner-move');
+      if (move) {
+        move.disabled = true;
+        moveOwnerRowsTo({ index: Number(move.dataset.ownerIndex) })
+          .then(() => location.reload())
+          .catch(error => { move.disabled = false; alert(error.message); });
+        return;
+      }
       const button = event.target.closest('.owner-remove');
       if (!button || !confirm('Remove this owner row?')) return;
       button.disabled = true;
