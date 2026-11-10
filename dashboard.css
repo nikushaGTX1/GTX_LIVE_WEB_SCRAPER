@@ -937,3 +937,47 @@ button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity:
 .sale-markup { max-width: 220px; padding: 8px 10px; border: 1px solid #0f766e; border-radius: 8px; font: inherit; }
 .sale-price-preview { font-weight: 700; color: #0f766e; }
 .sale-price-tag { display: block; color: #0f766e; font-weight: 600; }
+
+/* ---------- Owners table: fits the screen, no sideways scroll ---------- */
+.owners-table-wrap { max-height: calc(100vh - 220px); overflow-x: hidden; overflow-y: auto; border-top: 1px solid var(--line); }
+.owners-table { width: 100%; min-width: 0; table-layout: fixed; border-collapse: separate; border-spacing: 0; }
+.owners-table th, .owners-table td { min-width: 0 !important; white-space: normal; overflow-wrap: anywhere; vertical-align: top; }
+.owners-table th { position: sticky; top: 0; z-index: 3; padding: 12px 10px; background: #f6f4fb; border-bottom: 1px solid #e4def0; font-size: 10.5px; line-height: 1.35; letter-spacing: .04em; color: #5b5470; }
+.owners-table td { padding: 11px 10px; border-bottom: 1px solid #efedf4; font-size: 13px; line-height: 1.45; color: #1f2333; }
+/* Column widths: comment gets the room, everything else stays compact. */
+.owners-table th:nth-child(1) { width: 8.5%; }
+.owners-table th:nth-child(2) { width: 9%; }
+.owners-table th:nth-child(3) { width: 8%; }
+.owners-table th:nth-child(4) { width: 9%; }
+.owners-table th:nth-child(5) { width: 6.5%; }
+.owners-table th:nth-child(6) { width: 7.5%; }
+.owners-table th:nth-child(7) { width: 8%; }
+.owners-table th:nth-child(8) { width: 8%; }
+.owners-table th:nth-child(9) { width: auto; }
+.owners-table th:nth-child(10) { width: 9%; }
+.owners-table .owner-actions-column, .owners-table .owner-row-actions { width: 86px; white-space: nowrap; min-width: 0; padding-left: 4px; padding-right: 8px; }
+.owners-table tbody tr { transition: background-color 120ms ease; }
+.owners-table tbody tr:nth-child(even) td { background: #fbfafd; }
+.owners-table tbody tr:hover td { background: #f4f0fb; }
+.owners-table td[data-owner-column="0"], .owners-table td[data-owner-column="6"], .owners-table td[data-owner-column="7"] { font-variant-numeric: tabular-nums; color: #5b5470; font-size: 12.5px; }
+.owners-table td[data-owner-column="1"] { font-weight: 600; font-variant-numeric: tabular-nums; }
+.owners-table td[data-owner-column="5"] { font-weight: 700; color: #0f5132; }
+.owners-table td[data-owner-column="8"] { color: #3a3550; }
+.owners-table td[data-owner-column="9"] { color: #7a748c; font-size: 12px; }
+.owners-table td:empty::after { content: '—'; color: #c9c4d6; }
+.owners-table td[contenteditable]:focus:empty::after { content: ''; }
+.owner-remove { padding: 6px 8px; font-size: 11.5px; }
+.owner-district-menu { white-space: normal; }
+
+/* Narrow screens: each owner becomes a card instead of a wide row. */
+@media (max-width: 1100px) {
+  .owners-table, .owners-table tbody, .owners-table tr, .owners-table td { display: block; width: auto !important; }
+  .owners-table thead tr { display: flex; flex-wrap: wrap; gap: 6px; padding: 10px; }
+  .owners-table thead th { display: none; position: static; }
+  .owners-table thead th.owner-filter-heading, .owners-table thead th:has([data-owner-sort]) { display: block; width: auto !important; border: 0; background: transparent; }
+  .owners-table tbody tr { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 14px; margin: 10px; padding: 12px 14px; border: 1px solid #e7e2f0; border-radius: 12px; background: #fff; box-shadow: 0 1px 2px rgba(31, 35, 51, .04); }
+  .owners-table tbody tr td, .owners-table tbody tr:nth-child(even) td, .owners-table tbody tr:hover td { padding: 6px 0; border: 0; background: transparent; }
+  .owners-table td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 2px; color: #8a83a0; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+  .owners-table td[data-owner-column="8"] { grid-column: 1 / -1; }
+  .owners-table .owner-row-actions { grid-column: 1 / -1; text-align: right; }
+}
