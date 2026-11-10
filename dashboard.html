@@ -189,7 +189,7 @@
           return;
         }
         const text = result.entries
-          .map(entry => `${entry.link}\nComment: ${entry.comment || ''}`)
+          .map(entry => `${entry.link}\n${entry.salePrice ? `Price: ${entry.salePrice} (owner ${entry.ownerPrice} + ${entry.markup})\n` : ''}Comment: ${entry.comment || ''}`)
           .join('\n\n');
         if (navigator.clipboard?.writeText) await navigator.clipboard.writeText(text);
         else {
@@ -866,6 +866,15 @@
       editor.value = stripPropertyOptions(editor.value);
       editor.defaultValue = editor.value;
     });
+    // Live "owner + markup = sale price" preview under the sale markup box.
+    document.addEventListener('input', event => {
+      const input = event.target.closest?.('.sale-markup');
+      if (!input) return;
+      const owner = Number(input.dataset.ownerPrice) || 0;
+      const markup = Number(input.value);
+      const preview = input.parentElement.querySelector('.sale-price-preview');
+      if (preview) preview.textContent = owner && input.value !== '' && markup >= 0 ? `გასაყიდი ფასი: ${(owner + markup).toLocaleString('en-US')}` : '';
+    });
     const saveReview = async (row, action, comment = '', extra = {}) => {
       if (comment.length > 2000) throw new Error('Please shorten your comment so the comment and selected options fit within 2,000 characters.');
       const response = await fetch(`/api/apartments/${row.dataset.apartmentId}/review`, {
@@ -1006,10 +1015,16 @@
             commentRow.querySelector('.review-comment').focus();
             return;
           }
+          const markupInput = commentRow.querySelector('.sale-markup');
+          if (markupInput && (markupInput.value.trim() === '' || Number(markupInput.value) < 0)) {
+            alert('Sale apartment: type how much you add to the owner price (e.g. owner 90000, you sell for 92000 → type 2000).');
+            markupInput.focus();
+            return;
+          }
           const button = event.target.closest('.save-comment');
           button.disabled = true;
           button.textContent = 'Moving…';
-          await saveReview(row, 'accepted', comment);
+          await saveReview(row, 'accepted', comment, markupInput ? { markup: Number(markupInput.value) } : {});
           row.classList.add('review-accepting');
           setTimeout(() => {
             commentRow.remove();

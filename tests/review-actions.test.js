@@ -15,7 +15,14 @@ test('the checkmark opens a required comment before acceptance', () => {
   assert.match(handler, /commentRow\.hidden = false/);
   assert.doesNotMatch(handler, /saveReview\(row, 'accepted'\)/);
   assert.match(dashboard, /Please add a comment before moving this apartment to Ready For Upload/);
-  assert.match(dashboard, /await saveReview\(row, 'accepted', comment\)/);
+  assert.match(dashboard, /await saveReview\(row, 'accepted', comment, markupInput \? \{ markup: Number\(markupInput\.value\) \} : \{\}\)/);
+});
+
+test('sale apartments ask for the markup and carry the sale price into copied links', () => {
+  assert.match(server, /class="sale-markup"/);
+  assert.match(server, /item\._sale_price = ownerPrice \+ markup/);
+  assert.match(server, /nikas-sale-price=\$\{salePrice\}/);
+  assert.match(dashboard, /Price: \$\{entry\.salePrice\}/);
 });
 
 test('review requests identify the listing source', () => {

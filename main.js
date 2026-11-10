@@ -775,7 +775,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
       <td>${html(item.bedrooms || '—')}</td>
       <td>${html(item.area_m2 ? `${item.area_m2} m²` : '—')}</td>
       <td>${html(item.floor ? `${item.floor}${item.total_floors ? ` / ${item.total_floors}` : ''}` : '—')}</td>
-      <td class="price">${html(item.price || '—')}</td>
+      <td class="price">${html(item.price || '—')}${Number(item._sale_price) > 0 ? `<small class="sale-price-tag">გასაყიდი: ${html(Number(item._sale_price).toLocaleString('en-US'))} (+${html(String(item._sale_markup ?? 0))})</small>` : ''}</td>
       <td class="${item.phone ? '' : 'masked-phone'}">${html(item.phone || item._masked_phone || '—')}</td>
       <td><a class="listing-link" href="${html(item.url)}" target="_blank" rel="noopener noreferrer">Open listing ↗</a></td>
       <td>${websiteStatus}</td>
@@ -790,6 +790,10 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
             <textarea class="review-comment" maxlength="2000" placeholder="Add a comment before moving this apartment to Ready For Upload" required>${html(item._review_comment || '')}</textarea>
           </label>
           ${propertyOptionsHtml(item._review_comment || '')}
+          ${dealTypeOf(item) === 'sale' ? `<label class="sale-markup-label">რამდენს ამატებ მესაკუთრის ფასზე? <small>მესაკუთრის ფასი: ${html(item.price || '—')}</small>
+            <input class="sale-markup" type="number" min="0" step="any" inputmode="decimal" placeholder="მაგ. 2000" data-owner-price="${positiveNumber(item.price) || ''}" value="${item._sale_markup ?? ''}">
+            <output class="sale-price-preview"></output>
+          </label>` : ''}
           <div class="comment-actions">
             <button class="cancel-comment" type="button">Cancel</button>
             <button class="save-comment" type="button">Save comment &amp; move</button>
@@ -1106,6 +1110,15 @@ async function reviewApartment(request, response, viewer, apartmentId) {
       response.end(JSON.stringify({ ok: true, status: item._review_status, comment: item._review_comment }));
       return;
     }
+    if (body.action === 'accepted' && dealTypeOf(item) === 'sale') {
+      // The agent's markup on top of the owner's price, e.g. owner 90,000 + 2,000.
+      const markup = Number(String(body.markup ?? '').replace(/[\s,]/g, ''));
+      if (clean(body.markup) === '' || !Number.isFinite(markup) || markup < 0) throw new Error('Enter how much you add to the owner price (0 or more)');
+      const ownerPrice = positiveNumber(item.price);
+      if (!ownerPrice) throw new Error('This apartment has no owner price, so a sale price cannot be set');
+      item._sale_markup = markup;
+      item._sale_price = ownerPrice + markup;
+    }
     item._review_status = body.action;
     item._review_comment = comment;
     item._reviewed_by = viewer.name || viewer.email;
@@ -1255,10 +1268,16 @@ function startWebServer() {
         .sort((a, b) => String(a._reviewed_at || '').localeCompare(String(b._reviewed_at || '')));
       const entries = accepted.map(item => {
         const apartmentId = Number(item._website_api_apartment_id);
-        const link = Number.isInteger(apartmentId) && apartmentId > 0
-          ? `${String(item.url).split('#')[0]}#nikas-api-apartment-id=${apartmentId}`
-          : item.url;
-        return { link, comment: item._review_comment || '', apiApartmentId: Number.isInteger(apartmentId) ? apartmentId : null };
+        // Extra data rides in the link hash so the extension's Word reader keeps it.
+        const hash = [];
+        if (Number.isInteger(apartmentId) && apartmentId > 0) hash.push(`nikas-api-apartment-id=${apartmentId}`);
+        const salePrice = Number(item._sale_price);
+        if (salePrice > 0) hash.push(`nikas-sale-price=${salePrice}`);
+        const link = hash.length ? `${String(item.url).split('#')[0]}#${hash.join('&')}` : item.url;
+        return {
+          link, comment: item._review_comment || '', apiApartmentId: Number.isInteger(apartmentId) ? apartmentId : null,
+          salePrice: salePrice > 0 ? salePrice : null, ownerPrice: salePrice > 0 ? positiveNumber(item.price) : null, markup: salePrice > 0 ? Number(item._sale_markup) || 0 : null
+        };
       });
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
       response.end(JSON.stringify({ entries, daysAgo, date: targetDate }));

@@ -931,3 +931,9 @@ button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity:
 }
 .owners-deal-switch { margin-bottom: 14px; }
 .owners-deal-switch .deal-filter { text-decoration: none; }
+
+.sale-markup-label { display: grid; gap: 4px; margin: 10px 0; font-weight: 600; color: #0f766e; }
+.sale-markup-label small { font-weight: 400; color: #64748b; }
+.sale-markup { max-width: 220px; padding: 8px 10px; border: 1px solid #0f766e; border-radius: 8px; font: inherit; }
+.sale-price-preview { font-weight: 700; color: #0f766e; }
+.sale-price-tag { display: block; color: #0f766e; font-weight: 600; }
