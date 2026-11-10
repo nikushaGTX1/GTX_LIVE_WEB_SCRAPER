@@ -587,6 +587,7 @@ function ownerFiltersHtml(districts) {
   const select = (id, icon, label, list) => `<label class="owner-filter-field" for="${id}"><span class="owner-filter-label"><svg class="ui-icon" aria-hidden="true"><use href="#icon-${id.replace('owner-filter-', '')}"></use></svg>${html(label)}</span><select id="${id}">${options(list)}</select></label>`;
   const range = (id, icon, label, unit) => `<div class="owner-filter-field"><span class="owner-filter-label"><svg class="ui-icon" aria-hidden="true"><use href="#icon-${id.replace('owner-filter-', '')}"></use></svg>${html(label)}</span><span class="owner-filter-range"><input id="${id}-min" type="number" min="0" inputmode="decimal" placeholder="Min"><span aria-hidden="true">–</span><input id="${id}-max" type="number" min="0" inputmode="decimal" placeholder="Max">${unit ? `<small>${html(unit)}</small>` : ''}</span></div>`;
   return `<div class="owner-filters" id="owner-filters" role="group" aria-label="Filter owners">
+    ${select('owner-filter-type', '🏠', 'ტიპი', [['', 'ყველა ტიპი'], ['apartment', 'ბინები'], ['house', 'სახლები'], ['country', 'აგარაკები'], ['commercial', 'კომერციული'], ['land', 'მიწის ნაკვეთები'], ['hotel', 'სასტუმროები']])}
     ${select('owner-filter-district', '📍', 'District', [['', 'All districts'], ...districts.map(district => [district, district])])}
     ${select('owner-filter-rooms', '🚪', 'Rooms', [['', 'Any'], ['1', '1'], ['2', '2'], ['3', '3'], ['4', '4'], ['5+', '5+']])}
     ${select('owner-filter-bedrooms', '🛏️', 'Bedrooms', [['', 'Any'], ['1', '1'], ['2', '2'], ['3', '3'], ['4+', '4+']])}
@@ -600,7 +601,27 @@ function ownerFiltersHtml(districts) {
   </div>`;
 }
 
-function buildOwnersContent(viewer, subject = viewer, whole = false, deal = 'rent') {
+// Owner rows have no type column, so the type comes from the scraped listing
+// with the same MyHome / SS.ge / owner ID, else from words in the row itself.
+function ownerRowTypes(rows, items = []) {
+  const byId = new Map();
+  for (const item of items) {
+    const type = propertyTypeOf(item);
+    for (const id of [item.id, item.listing_id, ...(String(item.url || '').match(/\d{5,}/g) || [])]) {
+      if (clean(id)) byId.set(clean(id), type);
+    }
+  }
+  return rows.map(row => {
+    for (const index of [0, 6, 7]) {
+      const found = byId.get(clean(row[index]));
+      if (found) return found;
+    }
+    const text = row.map(clean).join(' ');
+    return PROPERTY_TYPES.find(type => type.key !== 'apartment' && type.pattern.test(text))?.key || 'apartment';
+  });
+}
+
+function buildOwnersContent(viewer, subject = viewer, whole = false, deal = 'rent', items = []) {
   const readOnly = whole || ownersPathFor(subject, deal) !== ownersPathFor(viewer, deal);
   const displayed = whole ? ownersData(WHOLE_OWNERS_VIEWER, deal) : ownersDataForSubject(viewer, subject, deal);
   const dealLink = target => {
@@ -619,7 +640,8 @@ function buildOwnersContent(viewer, subject = viewer, whole = false, deal = 'ren
     if (columnIndex === 4 || columnIndex === 5) return `<th><button class="owner-filter-button" type="button" data-owner-sort="${columnIndex}" aria-pressed="false">${html(header)} <span aria-hidden="true">↓</span></button></th>`;
     return `<th>${html(header)}</th>`;
   }).join('')}${readOnly ? '' : '<th class="owner-actions-column">Actions</th>'}`;
-  const rows = displayed.rows.map((row, rowIndex) => `<tr data-owner-row="${rowIndex}">${displayed.headers.map((_, columnIndex) => `<td class="owner-cell"${readOnly || columnIndex === OWNER_ADDED_COLUMN ? '' : ' contenteditable="true"'} spellcheck="false" data-owner-index="${rowIndex}" data-owner-column="${columnIndex}"${columnIndex === OWNER_ADDED_COLUMN ? ` data-added="${html(row[columnIndex] ?? '')}"` : ''}>${html(ownerCellText(row, columnIndex))}</td>`).join('')}${readOnly ? '' : `<td class="owner-row-actions"><button class="owner-remove" type="button" data-owner-index="${rowIndex}" aria-label="Remove owner row">Remove</button></td>`}</tr>`).join('\n');
+  const rowTypes = ownerRowTypes(displayed.rows, items);
+  const rows = displayed.rows.map((row, rowIndex) => `<tr data-owner-row="${rowIndex}" data-property-type="${rowTypes[rowIndex]}">${displayed.headers.map((_, columnIndex) => `<td class="owner-cell"${readOnly || columnIndex === OWNER_ADDED_COLUMN ? '' : ' contenteditable="true"'} spellcheck="false" data-owner-index="${rowIndex}" data-owner-column="${columnIndex}"${columnIndex === OWNER_ADDED_COLUMN ? ` data-added="${html(row[columnIndex] ?? '')}"` : ''}>${html(ownerCellText(row, columnIndex))}</td>`).join('')}${readOnly ? '' : `<td class="owner-row-actions"><button class="owner-remove" type="button" data-owner-index="${rowIndex}" aria-label="Remove owner row">Remove</button></td>`}</tr>`).join('\n');
   return `${dealSwitch}<section class="owners-panel" data-owners-deal="${deal}" aria-labelledby="owners-title">
     <div class="owners-toolbar">
       <div><p class="eyebrow">Owner database</p><h2 id="owners-title">${whole ? 'Whole owner database' : readOnly ? `${html(subject.name)}'s Owners` : 'Owners'}${deal === 'sale' ? ' · იყიდება' : ''}</h2><p id="owners-import-status">${displayed.rows.length} saved row(s)</p></div>
@@ -788,7 +810,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
     <a href="/?view=${view === 'accepted' ? 'accepted' : 'all'}">Show everyone</a>
   </div>` : '';
   const wholeOwners = view === 'owners' && ownersScope === 'all';
-  const content = view === 'owners' ? buildOwnersContent(viewer, selectedOwner || viewer, wholeOwners, ownersDeal) : view === 'team' ? buildTeamContent(allVisible, assignableAgents) : combined.length
+  const content = view === 'owners' ? buildOwnersContent(viewer, selectedOwner || viewer, wholeOwners, ownersDeal, allVisible) : view === 'team' ? buildTeamContent(allVisible, assignableAgents) : combined.length
     ? `${profileBanner}${acceptedSearch}<table class="results-table"><thead><tr>${canSelectTransfer ? '<th class="transfer-select-heading"><input id="select-all-apartments" type="checkbox" aria-label="Select all visible apartments"></th>' : ''}<th class="review-heading">Review</th><th>Source</th><th>ID</th><th>${view === 'accepted' ? 'Approved' : 'Received'}</th><th>District</th><th>Assigned agent</th><th>Rooms</th><th>Bedrooms</th><th>Area</th><th>Floor</th><th>Price</th><th>Phone</th><th>Link</th><th>Website</th>${showManagementComments ? '<th>Accepted by</th><th>Comment</th>' : ''}</tr></thead><tbody>${rows}</tbody></table>`
     : '<div class="empty">Waiting for a new apartment…</div>';
   const document = fs.readFileSync(DASHBOARD_TEMPLATE_PATH, 'utf8')

@@ -51,7 +51,7 @@ test('owner rows use a saved apartment neighbourhood instead of a combined admin
 test('managers share the complete owner database and team profiles link to each agent owners', () => {
   assert.match(source, /\['admin', 'manager'\]\.includes\(viewer\?\.role\)\) return sale \? ADMIN_SALE_OWNERS_PATH : ADMIN_OWNERS_PATH/);
   assert.match(source, /view=owners&agent=\$\{encodeURIComponent\(agent\.id\)\}/);
-  assert.match(source, /buildOwnersContent\(viewer, selectedOwner \|\| viewer, wholeOwners, ownersDeal\)/);
+  assert.match(source, /buildOwnersContent\(viewer, selectedOwner \|\| viewer, wholeOwners, ownersDeal, allVisible\)/);
   assert.match(source, /function ownersDataForSubject\(viewer, subject, deal = 'rent'\)/);
   assert.match(source, /String\(item\.assigned_agent_id \|\| ''\) === agentId/);
   assert.match(source, /central\.rows\.filter\(row => assignedListingIds\.has\(clean\(row\[0\]\)\)\)/);

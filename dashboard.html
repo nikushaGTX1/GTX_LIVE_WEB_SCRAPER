@@ -686,6 +686,8 @@
     const countMatches = (value, wanted) => wanted.endsWith('+') ? value >= Number(wanted.slice(0, -1)) : value === Number(wanted);
     const ownerFilterPasses = row => {
       const cell = index => row.cells[index]?.textContent.trim() || '';
+      const type = ownerField('owner-filter-type');
+      if (type && row.dataset.propertyType !== type) return false;
       const rooms = ownerField('owner-filter-rooms');
       if (rooms) { const value = ownerRooms(cell(3)); if (value === null || !countMatches(value, rooms)) return false; }
       const bedrooms = ownerField('owner-filter-bedrooms');
@@ -720,7 +722,7 @@
       return true;
     };
     const activeOwnerFilterCount = () => [
-      ownerDistrict, ...['rooms', 'bedrooms', 'currency', 'added', 'comment', 'option'].map(name => ownerField('owner-filter-' + name)),
+      ownerDistrict, ...['type', 'rooms', 'bedrooms', 'currency', 'added', 'comment', 'option'].map(name => ownerField('owner-filter-' + name)),
       ...['area', 'price'].map(name => ownerField('owner-filter-' + name + '-min') || ownerField('owner-filter-' + name + '-max'))
     ].filter(Boolean).length;
     const applyOwnerFilters = () => {
