@@ -819,7 +819,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
       <td>${html(item.bedrooms || '—')}</td>
       <td>${html(item.area_m2 ? `${item.area_m2} m²` : '—')}</td>
       <td>${html(item.floor ? `${item.floor}${item.total_floors ? ` / ${item.total_floors}` : ''}` : '—')}</td>
-      <td class="price">${html(item.price || '—')}${Number(item._sale_price) > 0 ? `<small class="sale-price-tag">გასაყიდი: ${html(Number(item._sale_price).toLocaleString('en-US'))} (+${html(String(item._sale_markup ?? 0))})</small>` : ''}</td>
+      <td class="price">${html(item.price || '—')}${Number(item._sale_price) > 0 ? `<small class="sale-price-tag">გასაყიდი: ${html(usdPriceText(item._sale_price))} (+${html(String(item._sale_markup ?? 0))})</small>` : ''}</td>
       <td class="${item.phone ? '' : 'masked-phone'}">${html(item.phone || item._masked_phone || '—')}</td>
       <td><a class="listing-link" href="${html(item.url)}" target="_blank" rel="noopener noreferrer">Open listing ↗</a></td>
       <td>${websiteStatus}</td>
@@ -834,8 +834,8 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
             <textarea class="review-comment" maxlength="2000" placeholder="Add a comment before moving this apartment to Ready For Upload" required>${html(item._review_comment || '')}</textarea>
           </label>
           ${propertyOptionsHtml(item._review_comment || '', dealTypeOf(item))}
-          ${dealTypeOf(item) === 'sale' ? `<label class="sale-markup-label">რამდენს ამატებ მესაკუთრის ფასზე? <small>მესაკუთრის ფასი: ${html(item.price || '—')}</small>
-            <input class="sale-markup" type="number" min="0" step="any" inputmode="decimal" placeholder="მაგ. 2000" data-owner-price="${positiveNumber(item.price) || ''}" value="${item._sale_markup ?? ''}">
+          ${dealTypeOf(item) === 'sale' ? `<label class="sale-markup-label">რამდენს ამატებ მესაკუთრის ფასზე? <small>მესაკუთრის ფასი: ${html(saleUsdPrice(item) ? usdPriceText(saleUsdPrice(item)) : 'USD ფასი უცნობია — გაიმეორე იმპორტი')}</small>
+            <input class="sale-markup" type="number" min="0" step="any" inputmode="decimal" placeholder="მაგ. 2000" data-owner-price="${saleUsdPrice(item) || ''}" value="${item._sale_markup ?? ''}">
             <output class="sale-price-preview"></output>
           </label>` : ''}
           <div class="comment-actions">
@@ -1158,8 +1158,8 @@ async function reviewApartment(request, response, viewer, apartmentId) {
       // The agent's markup on top of the owner's price, e.g. owner 90,000 + 2,000.
       const markup = Number(String(body.markup ?? '').replace(/[\s,]/g, ''));
       if (clean(body.markup) === '' || !Number.isFinite(markup) || markup < 0) throw new Error('Enter how much you add to the owner price (0 or more)');
-      const ownerPrice = positiveNumber(item.price);
-      if (!ownerPrice) throw new Error('This apartment has no owner price, so a sale price cannot be set');
+      const ownerPrice = saleUsdPrice(item);
+      if (!ownerPrice) throw new Error('This sale apartment has no USD price yet. Re-import its MyHome sale search with the extension, then try again.');
       item._sale_markup = markup;
       item._sale_price = ownerPrice + markup;
     }
@@ -1320,7 +1320,7 @@ function startWebServer() {
         const link = hash.length ? `${String(item.url).split('#')[0]}#${hash.join('&')}` : item.url;
         return {
           link, comment: item._review_comment || '', apiApartmentId: Number.isInteger(apartmentId) ? apartmentId : null,
-          salePrice: salePrice > 0 ? salePrice : null, ownerPrice: salePrice > 0 ? positiveNumber(item.price) : null, markup: salePrice > 0 ? Number(item._sale_markup) || 0 : null
+          salePrice: salePrice > 0 ? salePrice : null, ownerPrice: salePrice > 0 ? saleUsdPrice(item) : null, markup: salePrice > 0 ? Number(item._sale_markup) || 0 : null
         };
       });
       response.writeHead(200, { 'content-type': 'application/json; charset=utf-8', 'cache-control': 'no-store' });
@@ -1514,16 +1514,30 @@ function startWebServer() {
         let filteredOwner = 0;
         let filteredDescription = 0;
         let invalid = 0;
+        let pricesFixed = 0;
         for (const row of body.rows) {
           const id = String(row?.id ?? '').trim();
           if (!id || !/^\d+$/.test(id)) { invalid += 1; continue; }
-          if (permanentKeys.has(apartmentRegistryKey('MyHome', id))) { permanentlyDismissed += 1; continue; }
           const existing = data[id];
-          if (existing && !(existing._baseline && !existing._excluded && !existing.title)) { duplicates += 1; continue; }
+          // Re-importing a sale search repairs sale prices saved in GEL, also
+          // for apartments already reviewed (Ready For Upload).
+          const usd = myHomeUsdPrice(row);
+          if (existing && usd && (dealType || dealTypeOf(existing)) === 'sale' && existing.price !== usdPriceText(usd)) {
+            existing.price_usd = usd;
+            existing.price = usdPriceText(usd);
+            if (existing._sale_markup != null) existing._sale_price = usd + Number(existing._sale_markup || 0);
+            pricesFixed += 1;
+          }
+          if (permanentKeys.has(apartmentRegistryKey('MyHome', id))) { permanentlyDismissed += 1; continue; }
+          if (existing && !(existing._baseline && !existing._excluded && !existing.title)) {
+            duplicates += 1;
+            continue;
+          }
           const district = districtNameFromApiCard(row, fallbackDistrict);
           const item = myHomeApartment(row, id, '', new Date().toISOString(), district);
           if (propertyType) item.property_type = propertyType;
           if (dealType) item.deal_type = dealType;
+          if (dealTypeOf(item) === 'sale' && item.price_usd) item.price = usdPriceText(item.price_usd);
           if (belongsToSavedOwner(item, blockedOwners)) {
             item._baseline = true;
             item._excluded = true;
@@ -1547,10 +1561,10 @@ function startWebServer() {
           data[id] = item;
           imported += 1;
         }
-        if (imported || filteredOwner || filteredDescription) saveData(data);
+        if (imported || filteredOwner || filteredDescription || pricesFixed) saveData(data);
         if (imported) await assignPendingApartments(data, loadState());
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
-        response.end(JSON.stringify({ ok: true, imported, duplicates, permanentlyDismissed, filteredOwner, filteredDescription, invalid }));
+        response.end(JSON.stringify({ ok: true, imported, duplicates, permanentlyDismissed, filteredOwner, filteredDescription, invalid, pricesFixed }));
       } catch (error) {
         response.writeHead(400, { 'content-type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify({ error: error.message }));
@@ -2020,8 +2034,25 @@ function myHomeUrl(source, id) {
   return `https://www.myhome.ge/udzravi-qoneba/${slug}-${id}/`;
 }
 
+// MyHome price buckets: 1 = GEL, 2 = USD, 3 = EUR. Sales are quoted and
+// published in USD, rentals keep the GEL total the dashboard always showed.
+function myHomeUsdPrice(source) {
+  const usd = Number(source?.price?.['2']?.price_total);
+  return Number.isFinite(usd) && usd > 0 ? usd : null;
+}
+function usdPriceText(usd) {
+  return `${Number(usd).toLocaleString('en-US')}$`;
+}
+// The USD owner price of a sale apartment, or null when only GEL is known.
+function saleUsdPrice(item) {
+  const saved = Number(item?.price_usd);
+  if (Number.isFinite(saved) && saved > 0) return saved;
+  return /\$|usd/i.test(String(item?.price || '')) ? positiveNumber(item.price) : null;
+}
+
 function myHomeApartment(source, id, phone, firstSeen = new Date().toISOString(), district = '') {
   const gel = source.price?.['1']?.price_total;
+  const usd = myHomeUsdPrice(source);
   const phoneInfo = myHomePhoneInfo(source);
   return {
     apartment_id: id,
@@ -2032,6 +2063,7 @@ function myHomeApartment(source, id, phone, firstSeen = new Date().toISOString()
     phone: phone || phoneInfo.phone,
     _masked_phone: phone || phoneInfo.phone ? '' : phoneInfo.masked,
     price: gel == null ? '' : `${Number(gel).toLocaleString('en-US')}₾`,
+    price_usd: usd,
     rooms: clean(source.room ?? source.room_type_id),
     bedrooms: clean(source.bedroom ?? source.bedroom_type_id),
     area_m2: clean(source.area),

@@ -23,6 +23,9 @@ function run(rows, { role = 'admin', district, propertyType, dealType, existingD
     readRequestJson: async () => ({ rows, district, propertyType, dealType }),
     DEAL_TYPE_KEYS: new Set(['rent', 'sale']),
     PROPERTY_TYPE_KEYS: new Set(['apartment', 'house', 'country', 'commercial', 'land', 'hotel']),
+    dealTypeOf: item => item.deal_type === 'sale' ? 'sale' : 'rent',
+    myHomeUsdPrice: row => Number(row?.price?.['2']?.price_total) || null,
+    usdPriceText: usd => `${Number(usd).toLocaleString('en-US')}$`,
     liveMyHomeData: data, liveSsData: {},
     loadData: () => data, loadSsData: () => ({}),
     permanentApartmentKeys: (myHomeData) => new Set(rejectedIds.map(id => `MyHome:${id}`)),
@@ -108,4 +111,14 @@ test('stores the rent/sale deal type sent by the extension', async () => {
   assert.equal(sale.data['601'].deal_type, 'sale');
   const unknown = await run([{ id: '602' }], { dealType: 'swap' });
   assert.equal(unknown.data['602'].deal_type, undefined);
+});
+
+test('re-importing a sale search replaces GEL sale prices with the listing USD price', async () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  assert.match(main, /existing\.price = usdPriceText\(usd\)/);
+  assert.match(main, /existing\._sale_price = usd \+ Number\(existing\._sale_markup/);
+  assert.match(main, /if \(dealTypeOf\(item\) === 'sale' && item\.price_usd\) item\.price = usdPriceText\(item\.price_usd\)/);
+  assert.match(main, /const ownerPrice = saleUsdPrice\(item\)/);
 });
