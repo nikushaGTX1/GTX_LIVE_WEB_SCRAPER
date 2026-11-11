@@ -2096,7 +2096,11 @@ function convertSalePricesToUsd(data, rate) {
 
 async function refreshSaleUsdPrices() {
   const rate = await fetchUsdRate();
-  if (!rate) { console.error('USD rate unavailable; sale prices in ₾ stay until the next try.'); return; }
+  if (!rate) {
+    console.error('USD rate unavailable; retrying in 10 minutes.');
+    setTimeout(() => refreshSaleUsdPrices().catch(() => {}), 10 * 60 * 1000).unref?.();
+    return;
+  }
   usdRate = rate;
   const myHome = convertSalePricesToUsd(liveMyHomeData, rate);
   const ss = convertSalePricesToUsd(liveSsData, rate);
