@@ -684,7 +684,20 @@ function buildOwnersContent(viewer, subject = viewer, whole = false, deal = 'ren
     return `<th>${html(header)}</th>`;
   }).join('')}${readOnly ? '' : '<th class="owner-actions-column">Actions</th>'}`;
   const rowTypes = ownerRowTypes(displayed.rows, items);
-  const rows = displayed.rows.map((row, rowIndex) => `<tr data-owner-row="${rowIndex}" data-property-type="${rowTypes[rowIndex]}">${displayed.headers.map((_, columnIndex) => `<td class="owner-cell"${readOnly || columnIndex === OWNER_ADDED_COLUMN ? '' : ' contenteditable="true"'} spellcheck="false" data-label="${html(displayed.headers[columnIndex])}" data-owner-index="${rowIndex}" data-owner-column="${columnIndex}"${columnIndex === OWNER_ADDED_COLUMN ? ` data-added="${html(row[columnIndex] ?? '')}"` : ''}>${html(ownerCellText(row, columnIndex))}</td>`).join('')}${readOnly ? '' : `<td class="owner-row-actions"><button class="owner-move" type="button" data-owner-index="${rowIndex}" title="${deal === 'sale' ? 'Move to rent owners' : 'Move to sale owners'}">${deal === 'sale' ? '→ ქირა' : '→ იყიდება'}</button><button class="owner-remove" type="button" data-owner-index="${rowIndex}" aria-label="Remove owner row">Remove</button></td>`}</tr>`).join('\n');
+  // Owner ID and MyHome ID are MyHome listing IDs, SS.ge ID is an SS.ge one.
+  // A scraped listing with that ID gives its exact URL; otherwise the site's
+  // plain ID address opens it.
+  const listingUrls = new Map();
+  for (const item of items) if (item.url && item.apartment_id) listingUrls.set(`${item.source === 'SS.ge' ? 'ss' : 'mh'}:${clean(item.apartment_id)}`, item.url);
+  const ownerCellHtml = (row, columnIndex) => {
+    const text = ownerCellText(row, columnIndex);
+    const id = clean(row[columnIndex]);
+    if (![0, 6, 7].includes(columnIndex) || !/^\d{5,}$/.test(id)) return html(text);
+    const ss = columnIndex === 7;
+    const url = listingUrls.get(`${ss ? 'ss' : 'mh'}:${id}`) || (ss ? `https://home.ss.ge/ka/udzravi-qoneba/${id}` : `https://www.myhome.ge/udzravi-qoneba/${id}/`);
+    return `<a class="owner-id-link" href="${html(url)}" target="_blank" rel="noopener noreferrer" title="Open listing">${html(text)}</a>`;
+  };
+  const rows = displayed.rows.map((row, rowIndex) => `<tr data-owner-row="${rowIndex}" data-property-type="${rowTypes[rowIndex]}">${displayed.headers.map((_, columnIndex) => `<td class="owner-cell"${readOnly || columnIndex === OWNER_ADDED_COLUMN ? '' : ' contenteditable="true"'} spellcheck="false" data-label="${html(displayed.headers[columnIndex])}" data-owner-index="${rowIndex}" data-owner-column="${columnIndex}"${columnIndex === OWNER_ADDED_COLUMN ? ` data-added="${html(row[columnIndex] ?? '')}"` : ''}>${ownerCellHtml(row, columnIndex)}</td>`).join('')}${readOnly ? '' : `<td class="owner-row-actions"><button class="owner-move" type="button" data-owner-index="${rowIndex}" title="${deal === 'sale' ? 'Move to rent owners' : 'Move to sale owners'}">${deal === 'sale' ? '→ ქირა' : '→ იყიდება'}</button><button class="owner-remove" type="button" data-owner-index="${rowIndex}" aria-label="Remove owner row">Remove</button></td>`}</tr>`).join('\n');
   return `${dealSwitch}<section class="owners-panel" data-owners-deal="${deal}" aria-labelledby="owners-title">
     <div class="owners-toolbar">
       <div><p class="eyebrow">Owner database</p><h2 id="owners-title">${whole ? 'Whole owner database' : readOnly ? `${html(subject.name)}'s Owners` : 'Owners'}${deal === 'sale' ? ' · იყიდება' : ''}</h2><p id="owners-import-status">${displayed.rows.length} saved row(s)</p></div>
@@ -811,7 +824,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
         </div>
       </td>
       <td><span class="source ${item.source === 'SS.ge' ? 'ss' : ''}">${html(item.source)}</span></td>
-      <td>${html(item.apartment_id)}</td>
+      <td><a class="apartment-id-link" href="${html(item.url)}" target="_blank" rel="noopener noreferrer" title="Open listing">${html(item.apartment_id)}</a></td>
       <td title="${html(displayedAt || '')}">${html(dashboardDateTime(displayedAt))}</td>
       <td>${html(item.district || 'Other')}<div class="property-badges">${propertyOptionsFor(dealTypeOf(item)).filter(label => (item._review_comment || '').includes('[' + label + ']')).map(label => `<span>${html(label)}</span>`).join('')}</div></td>
       <td>${canReassign ? `<select class="agent-reassign" aria-label="Reassign apartment ${html(item.apartment_id)}"><option value="">Unassigned</option>${assignmentOptions(item)}</select>` : html(item.assigned_agent_name || item.assigned_agent_id || 'Pending')}</td>
@@ -820,8 +833,8 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
       <td>${html(item.area_m2 ? `${item.area_m2} m²` : '—')}</td>
       <td>${html(item.floor ? `${item.floor}${item.total_floors ? ` / ${item.total_floors}` : ''}` : '—')}</td>
       <td class="price">${html(item.price || '—')}${Number(item._sale_price) > 0 ? `<small class="sale-price-tag">გასაყიდი: ${html(usdPriceText(item._sale_price))} (+${html(String(item._sale_markup ?? 0))})</small>` : ''}</td>
-      <td class="${item.phone ? '' : 'masked-phone'}">${html(item.phone || item._masked_phone || '—')}</td>
-      <td><a class="listing-link" href="${html(item.url)}" target="_blank" rel="noopener noreferrer">Open listing ↗</a></td>
+      <td class="phone-cell${item.phone ? '' : ' masked-phone'}">${html(item.phone || item._masked_phone || '—')}</td>
+      <td><a class="listing-link" href="${html(item.url)}" target="_blank" rel="noopener noreferrer">Open ↗</a></td>
       <td>${websiteStatus}</td>
       ${showManagementComments ? `<td class="accepted-agent"><strong>${html(item._reviewed_by || 'Unknown agent')}</strong><small>${item._reviewed_at ? html(item._reviewed_at) : ''}</small></td><td class="management-comment"><p class="accepted-note">${html(item._review_comment || '')}</p><details class="accepted-review-details"><summary>Edit comment &amp; options</summary><div class="accepted-comment-edit"><textarea class="accepted-comment-editor" maxlength="2000" aria-label="Apartment comment">${html(item._review_comment || '')}</textarea>${propertyOptionsHtml(item._review_comment || '', dealTypeOf(item))}<button class="update-comment" type="button">Save comment</button></div></details></td>` : ''}
     </tr>`;

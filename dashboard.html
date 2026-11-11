@@ -665,6 +665,34 @@
         location.reload();
       } catch (error) { button.disabled = false; alert(error.message); }
     });
+    // Owner IDs are links; the cell around them stays editable. Ctrl/⌘-click
+    // on the ID edits it instead of opening the listing.
+    document.querySelector('.owners-table')?.addEventListener('click', event => {
+      const link = event.target.closest('.owner-id-link');
+      if (!link || event.ctrlKey || event.metaKey) return;
+      event.preventDefault();
+      window.open(link.href, '_blank', 'noopener');
+    });
+    // Card layout on narrow screens labels every apartment cell by its column.
+    const resultsTable = document.querySelector('.results-table');
+    if (resultsTable) {
+      const labels = [...resultsTable.tHead.rows[0].cells].map(cell => cell.textContent.trim());
+      resultsTable.querySelectorAll('tbody tr.apartment-row').forEach(row => {
+        [...row.cells].forEach((cell, index) => { if (labels[index]) cell.dataset.label = labels[index]; });
+      });
+      // Too many columns for the screen: show each apartment as a card instead.
+      const fitResults = () => {
+        resultsTable.classList.remove('as-cards');
+        const wrap = resultsTable.closest('.results') || resultsTable.parentElement;
+        resultsTable.classList.toggle('as-cards', resultsTable.scrollWidth > wrap.clientWidth + 2);
+      };
+      fitResults();
+      let fitTimer;
+      const refit = () => { clearTimeout(fitTimer); fitTimer = setTimeout(fitResults, 120); };
+      window.addEventListener('resize', refit);
+      // Deal, type, district and search filters change which rows show.
+      new MutationObserver(refit).observe(resultsTable.tBodies[0], { subtree: true, childList: true, attributes: true, attributeFilter: ['hidden', 'style', 'class'] });
+    }
     document.querySelector('.owners-table')?.addEventListener('click', event => {
       const move = event.target.closest('.owner-move');
       if (move) {

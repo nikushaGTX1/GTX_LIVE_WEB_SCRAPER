@@ -29,3 +29,13 @@ test('deal type is sale only when stated, otherwise rent', () => {
   assert.equal(dealTypeOf({ deal_type: 'swap' }), 'rent');
   assert.equal(dealTypeOf({}), 'rent');
 });
+
+test('apartment and owner IDs open their listings and the table never scrolls sideways', () => {
+  const source = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const template = fs.readFileSync(path.join(__dirname, '..', 'dashboard.html'), 'utf8');
+  const css = fs.readFileSync(path.join(__dirname, '..', 'dashboard.css'), 'utf8');
+  assert.match(source, /class="apartment-id-link" href="\$\{html\(item\.url\)\}"/);
+  assert.match(source, /class="owner-id-link"/);
+  assert.match(template, /classList\.toggle\('as-cards', resultsTable\.scrollWidth > wrap\.clientWidth \+ 2\)/);
+  assert.match(css, /\.results \{ overflow-x: hidden; \}/);
+});

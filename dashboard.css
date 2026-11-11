@@ -988,3 +988,38 @@ button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity:
 .owner-row-actions .owner-remove { width: 100%; }
 .owners-actions #owners-move-sale { border: 1px solid #b6dcd6; background: #effaf8; color: #0f766e; }
 @media (max-width: 1100px) { .owners-table .owner-row-actions { display: flex; justify-content: flex-end; gap: 8px; } .owner-move, .owner-row-actions .owner-remove { width: auto; margin: 0; } }
+
+/* ---------- Apartments table: fits the screen, no sideways scroll ---------- */
+.results { overflow-x: hidden; }
+.results-table { width: 100%; min-width: 0; table-layout: auto; border-collapse: separate; border-spacing: 0; }
+.results-table th { padding: 12px 9px; font-size: 10px; line-height: 1.3; white-space: normal; background: #f6f4fb; border-bottom: 1px solid #e4def0; color: #5b5470; }
+.results-table td { padding: 12px 9px; font-size: 13px; line-height: 1.4; white-space: normal; overflow-wrap: anywhere; vertical-align: middle; border-bottom: 1px solid #efedf4; }
+.results-table tbody tr.apartment-row:nth-of-type(4n+1) td { background: #fff; }
+.results-table tbody tr.apartment-row:hover td { background: #f6f2fc; }
+.results-table .review-heading, .results-table .review-cell { position: static; min-width: 0; box-shadow: none; }
+.results-table .review-buttons { gap: 5px; }
+.results-table .review-button { width: 30px; height: 30px; }
+.results-table .agent-reassign { width: 100%; max-width: 170px; min-width: 0; padding: 7px 8px; font-size: 12px; }
+.results-table td.price { white-space: nowrap; font-weight: 700; }
+.results-table td.price .sale-price-tag { font-size: 11.5px; }
+.results-table .listing-link { padding: 6px 9px; font-size: 12px; }
+.results-table .property-badges span { font-size: 10.5px; }
+.apartment-id-link, .owner-id-link { color: #451a8f; font-weight: 700; font-variant-numeric: tabular-nums; text-decoration: none; border-bottom: 1px dashed #b9a6dc; }
+.apartment-id-link:hover, .owner-id-link:hover { color: #2c0f63; border-bottom-style: solid; }
+.apartment-id-link::after, .owner-id-link::after { content: ' ↗'; font-size: 10px; opacity: .6; }
+
+/* Card layout: set by the page whenever the table is wider than the screen. */
+  .results-table.as-cards thead { display: none; }
+  .results-table.as-cards, .results-table.as-cards tbody { display: block; width: auto; }
+  .results-table.as-cards tr.apartment-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 4px 16px; margin: 10px; padding: 14px 16px; border: 1px solid #e7e2f0; border-radius: 12px; background: #fff; box-shadow: 0 1px 2px rgba(31, 35, 51, .04); }
+  .results-table.as-cards tr.apartment-row td, .results-table.as-cards tbody tr.apartment-row:hover td { display: block; padding: 6px 0; border: 0; background: transparent; }
+  .results-table.as-cards tr.apartment-row td[data-label]::before { content: attr(data-label); display: block; margin-bottom: 2px; color: #8a83a0; font-size: 10px; font-weight: 700; letter-spacing: .04em; text-transform: uppercase; }
+  .results-table.as-cards tr.comment-row { display: block; margin: -4px 10px 10px; }
+  .results-table.as-cards tr.comment-row td { display: block; }
+
+.results-table:not(.as-cards) .apartment-id-link, .results-table:not(.as-cards) td.price { white-space: nowrap; }
+.results-table:not(.as-cards) td.management-comment { min-width: 220px; }
+.results-table td.accepted-agent small { overflow-wrap: anywhere; }
+.results-table.as-cards td.management-comment, .results-table.as-cards td.accepted-agent { grid-column: 1 / -1; }
+.results-table:not(.as-cards) td.phone-cell { white-space: nowrap; }
+.results-table:not(.as-cards) .agent-reassign { min-width: 130px; }
