@@ -109,7 +109,7 @@
       <span class="district-control"><button class="district-filter" type="button" data-district="Digomi">Digomi</button><button class="district-remove" type="button" data-district="Digomi" aria-label="Remove every Digomi apartment" title="Remove every Digomi apartment" hidden>×</button></span>
     </nav>
     <div class="listing-options-bar" id="listing-options-bar">
-      <label>Property options <select id="listing-option-filter"><option value="">All options</option><option data-deal="rent">Pet friendly</option><option>50% commission</option><option data-deal="rent">Furnished</option><option data-deal="rent">Short-term rental</option><option data-deal="rent">Indians allowed</option><option data-deal="sale">თეთრი კარკასი</option><option data-deal="sale">შავი კარკასი</option><option data-deal="sale">მწვანე კარკასი</option><option data-deal="sale">ახალი გარემონტებული</option><option data-deal="sale">ძველი რემონტით</option><option data-deal="sale">სარემონტო</option><option data-deal="sale">ახალი აშენებული</option><option data-deal="sale">იპოთეკით</option><option data-deal="sale">განვადებით</option><option data-deal="sale">გაცვლა</option><option data-deal="sale">ფასი შეთანხმებით</option></select></label>
+      <label>Property options <select id="listing-option-filter"><option value="">All options</option><option data-deal="rent">Pet friendly</option><option data-deal="rent">50% commission</option><option data-deal="rent">Furnished</option><option data-deal="rent">Short-term rental</option><option data-deal="rent">Indians allowed</option><option data-deal="sale">თეთრი კარკასი</option><option data-deal="sale">შავი კარკასი</option><option data-deal="sale">მწვანე კარკასი</option><option data-deal="sale">ახალი გარემონტებული</option><option data-deal="sale">ძველი რემონტით</option><option data-deal="sale">სარემონტო</option><option data-deal="sale">ახალი აშენებული</option><option data-deal="sale">იპოთეკით</option></select></label>
       <button type="button" id="listing-filter-reset">Reset filters</button>
       <span id="listing-filter-status" aria-live="polite"></span>
     </div>
@@ -936,7 +936,7 @@
       const owner = Number(input.dataset.ownerPrice) || 0;
       const markup = Number(input.value);
       const preview = input.parentElement.querySelector('.sale-price-preview');
-      if (preview) preview.textContent = owner && input.value !== '' && markup >= 0 ? `გასაყიდი ფასი: ${(owner + markup).toLocaleString('en-US')}` : '';
+      if (preview) preview.textContent = owner && input.value !== '' && markup >= 0 ? `გასაყიდი ფასი: ${(owner + markup).toLocaleString('en-US')}$` : '';
     });
     const saveReview = async (row, action, comment = '', extra = {}) => {
       if (comment.length > 2000) throw new Error('Please shorten your comment so the comment and selected options fit within 2,000 characters.');

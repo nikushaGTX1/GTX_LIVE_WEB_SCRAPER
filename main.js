@@ -617,7 +617,7 @@ function ownerCellText(row, columnIndex) {
 // Checkbox tags saved into the review comment as "[label]". Rentals and sales
 // need different ones: nobody asks if a flat for sale is pet friendly.
 const RENT_PROPERTY_OPTIONS = ['Pet friendly', '50% commission', 'Furnished', 'Short-term rental', 'Indians allowed'];
-const SALE_PROPERTY_OPTIONS = ['თეთრი კარკასი', 'შავი კარკასი', 'მწვანე კარკასი', 'ახალი გარემონტებული', 'ძველი რემონტით', 'სარემონტო', 'ახალი აშენებული', 'იპოთეკით', 'განვადებით', 'გაცვლა', 'ფასი შეთანხმებით', '50% commission'];
+const SALE_PROPERTY_OPTIONS = ['თეთრი კარკასი', 'შავი კარკასი', 'მწვანე კარკასი', 'ახალი გარემონტებული', 'ძველი რემონტით', 'სარემონტო', 'ახალი აშენებული', 'იპოთეკით'];
 const propertyOptionsFor = deal => deal === 'sale' ? SALE_PROPERTY_OPTIONS : RENT_PROPERTY_OPTIONS;
 
 function propertyOptionsHtml(comment = '', deal = 'rent') {
