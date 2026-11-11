@@ -1522,9 +1522,10 @@ function startWebServer() {
           // Re-importing a sale search repairs sale prices saved in GEL, also
           // for apartments already reviewed (Ready For Upload).
           const usd = myHomeUsdPrice(row);
-          if (existing && usd && (dealType || dealTypeOf(existing)) === 'sale' && existing.price !== usdPriceText(usd)) {
+          if (existing && usd && (dealType || dealTypeOf(existing)) === 'sale' && (existing.price !== usdPriceText(usd) || existing._price_usd_estimated)) {
             existing.price_usd = usd;
             existing.price = usdPriceText(usd);
+            delete existing._price_usd_estimated;
             if (existing._sale_markup != null) existing._sale_price = usd + Number(existing._sale_markup || 0);
             pricesFixed += 1;
           }
@@ -1538,6 +1539,7 @@ function startWebServer() {
           if (propertyType) item.property_type = propertyType;
           if (dealType) item.deal_type = dealType;
           if (dealTypeOf(item) === 'sale' && item.price_usd) item.price = usdPriceText(item.price_usd);
+          else if (usdRate) convertSalePricesToUsd({ [id]: item }, usdRate);
           if (belongsToSavedOwner(item, blockedOwners)) {
             item._baseline = true;
             item._excluded = true;
@@ -2048,6 +2050,59 @@ function saleUsdPrice(item) {
   const saved = Number(item?.price_usd);
   if (Number.isFinite(saved) && saved > 0) return saved;
   return /\$|usd/i.test(String(item?.price || '')) ? positiveNumber(item.price) : null;
+}
+
+// GEL per 1 USD from the National Bank of Georgia (open.er-api.com as a
+// fallback). Used only for sale apartments saved before their USD price was
+// kept; a later sale-search re-import replaces the estimate with MyHome's.
+let usdRate = null;
+async function fetchUsdRate() {
+  const nbg = 'https://nbg.gov.ge/gw/api/ct/monetarypolicy/currencies/en/json/?currencies=USD';
+  try {
+    // NBG answers the first request with a cookie and a redirect to itself.
+    const first = await fetch(nbg, { redirect: 'manual', signal: AbortSignal.timeout(15000) });
+    const cookie = (first.headers.getSetCookie?.() || []).map(value => value.split(';')[0]).join('; ');
+    const response = first.ok ? first : await fetch(nbg, { headers: cookie ? { cookie } : {}, signal: AbortSignal.timeout(15000) });
+    const rate = Number((await response.json())?.[0]?.currencies?.[0]?.rate);
+    if (rate > 1 && rate < 10) return rate;
+  } catch {}
+  try {
+    const response = await fetch('https://open.er-api.com/v6/latest/USD', { signal: AbortSignal.timeout(15000) });
+    const rate = Number((await response.json())?.rates?.GEL);
+    if (rate > 1 && rate < 10) return rate;
+  } catch {}
+  return null;
+}
+
+// Converts every sale apartment still priced in ₾ to USD. Returns the count.
+function convertSalePricesToUsd(data, rate) {
+  if (!(rate > 0)) return 0;
+  let changed = 0;
+  for (const item of Object.values(data || {})) {
+    if (dealTypeOf(item) !== 'sale' || saleUsdPrice(item)) continue;
+    if (!/₾|ლარ|gel/i.test(String(item.price || ''))) continue;
+    const gel = positiveNumber(item.price);
+    if (!gel) continue;
+    const usd = Math.round(gel / rate);
+    item.price_gel = item.price;
+    item.price_usd = usd;
+    item.price = usdPriceText(usd);
+    item._price_usd_estimated = rate;
+    if (item._sale_markup != null) item._sale_price = usd + Number(item._sale_markup || 0);
+    changed += 1;
+  }
+  return changed;
+}
+
+async function refreshSaleUsdPrices() {
+  const rate = await fetchUsdRate();
+  if (!rate) { console.error('USD rate unavailable; sale prices in ₾ stay until the next try.'); return; }
+  usdRate = rate;
+  const myHome = convertSalePricesToUsd(liveMyHomeData, rate);
+  const ss = convertSalePricesToUsd(liveSsData, rate);
+  if (myHome) saveData(liveMyHomeData);
+  if (ss) saveData(liveSsData, SS_DATA_PATH, SS_CSV_PATH);
+  if (myHome + ss) console.log(`Converted ${myHome + ss} sale price(s) from ₾ to USD at ${rate} GEL/USD.`);
 }
 
 function myHomeApartment(source, id, phone, firstSeen = new Date().toISOString(), district = '') {
@@ -3005,6 +3060,8 @@ async function main() {
   const ssData = loadSsData();
   liveMyHomeData = data;
   liveSsData = ssData;
+  refreshSaleUsdPrices().catch(error => console.error(`Sale USD conversion failed: ${error.message}`));
+  setInterval(() => refreshSaleUsdPrices().catch(() => {}), 6 * 60 * 60 * 1000).unref?.();
   const state = loadState();
   for (const [source, sourceData] of [['MyHome', data], ['SS.ge', ssData]]) {
     for (const item of Object.values(sourceData)) {

@@ -26,6 +26,8 @@ function run(rows, { role = 'admin', district, propertyType, dealType, existingD
     dealTypeOf: item => item.deal_type === 'sale' ? 'sale' : 'rent',
     myHomeUsdPrice: row => Number(row?.price?.['2']?.price_total) || null,
     usdPriceText: usd => `${Number(usd).toLocaleString('en-US')}$`,
+    usdRate: null,
+    convertSalePricesToUsd: () => 0,
     liveMyHomeData: data, liveSsData: {},
     loadData: () => data, loadSsData: () => ({}),
     permanentApartmentKeys: (myHomeData) => new Set(rejectedIds.map(id => `MyHome:${id}`)),
@@ -121,4 +123,30 @@ test('re-importing a sale search replaces GEL sale prices with the listing USD p
   assert.match(main, /existing\._sale_price = usd \+ Number\(existing\._sale_markup/);
   assert.match(main, /if \(dealTypeOf\(item\) === 'sale' && item\.price_usd\) item\.price = usdPriceText\(item\.price_usd\)/);
   assert.match(main, /const ownerPrice = saleUsdPrice\(item\)/);
+});
+
+test('sale prices still in GEL are converted to USD at the national bank rate', () => {
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const main = fs.readFileSync(path.join(__dirname, '..', 'main.js'), 'utf8');
+  const start = main.indexOf('function convertSalePricesToUsd(');
+  const end = main.indexOf('\nasync function refreshSaleUsdPrices', start);
+  const convert = new Function('dealTypeOf', 'saleUsdPrice', 'positiveNumber', 'usdPriceText',
+    `${main.slice(start, end)}; return convertSalePricesToUsd;`)(
+    item => /iyideba/.test(item.url) ? 'sale' : 'rent',
+    item => Number(item.price_usd) || null,
+    value => Number(String(value).replace(/[^\d.]/g, '')) || null,
+    usd => `${Number(usd).toLocaleString('en-US')}$`
+  );
+  const data = {
+    a: { url: 'https://www.myhome.ge/udzravi-qoneba/iyideba-bina-1', price: '604,472₾', _sale_markup: 3000, _sale_price: 607472 },
+    b: { url: 'https://www.myhome.ge/udzravi-qoneba/qiravdeba-bina-2', price: '2,000₾' },
+    c: { url: 'https://www.myhome.ge/udzravi-qoneba/iyideba-bina-3', price: '120,000$', price_usd: 120000 }
+  };
+  assert.equal(convert(data, 2.5936), 1);
+  assert.equal(data.a.price, '233,063$');
+  assert.equal(data.a._sale_price, 236063);
+  assert.equal(data.a.price_gel, '604,472₾');
+  assert.equal(data.b.price, '2,000₾');
+  assert.equal(data.c.price, '120,000$');
 });
