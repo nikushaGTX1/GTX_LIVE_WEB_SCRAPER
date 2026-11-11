@@ -678,7 +678,12 @@
     if (resultsTable) {
       const labels = [...resultsTable.tHead.rows[0].cells].map(cell => cell.textContent.trim());
       resultsTable.querySelectorAll('tbody tr.apartment-row').forEach(row => {
-        [...row.cells].forEach((cell, index) => { if (labels[index]) cell.dataset.label = labels[index]; });
+        [...row.cells].forEach((cell, index) => {
+          if (labels[index]) cell.dataset.label = labels[index];
+          // Column key for the card layout, e.g. c-price, c-assigned-agent.
+          const key = (labels[index] || (index === 0 ? 'select' : '')).toLowerCase().replace(/[^a-z]+/g, '-').replace(/^-|-$/g, '');
+          if (key) cell.classList.add('c-' + (key === 'received' ? 'approved' : key));
+        });
       });
       // Too many columns for the screen: show each apartment as a card instead.
       const fitResults = () => {

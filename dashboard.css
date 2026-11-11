@@ -1023,3 +1023,87 @@ button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity:
 .results-table.as-cards td.management-comment, .results-table.as-cards td.accepted-agent { grid-column: 1 / -1; }
 .results-table:not(.as-cards) td.phone-cell { white-space: nowrap; }
 .results-table:not(.as-cards) .agent-reassign { min-width: 130px; }
+
+/* ---------- Apartment cards (used when the table does not fit) ---------- */
+/* Every field has a named spot, so each card reads the same: ID, district
+   and price on top, facts as chips, then people and actions, then notes. */
+.results .results-table.as-cards tr.apartment-row {
+  display: grid;
+  grid-template-columns: auto auto auto auto minmax(0, 1fr) auto auto;
+  grid-template-areas:
+    "id     id       district district district date    price"
+    "rooms  bedrooms area     floor    .        .       price"
+    "agent  agent    phone    phone    .        link    actions"
+    "acc    acc      acc      acc      acc      acc     acc"
+    "note   note     note     note     note     note    note";
+  align-items: center;
+  gap: 12px 14px;
+  margin: 12px;
+  padding: 18px 20px;
+  border: 1px solid #e7e2f0;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(31, 35, 51, .05);
+  transition: box-shadow 150ms ease, border-color 150ms ease;
+}
+.results .results-table.as-cards tr.apartment-row:hover { border-color: #cdbfe6; box-shadow: 0 6px 18px rgba(69, 26, 143, .08); }
+.results .results-table.as-cards tr.apartment-row > td { display: block; padding: 0; border: 0; background: transparent; }
+.results .results-table.as-cards tr.apartment-row > td::before { display: none; }
+.results .results-table.as-cards tr.apartment-row > td.c-select { display: none; }
+.results .results-table.as-cards tr.apartment-row > td.c-source { display: none; }
+
+.results .results-table.as-cards tr.apartment-row > td.c-id { grid-area: id; font-size: 17px; }
+.results .results-table.as-cards tr.apartment-row > td.c-district { grid-area: district; font-weight: 600; color: #1f2333; }
+.results .results-table.as-cards tr.apartment-row > td.c-district .property-badges { margin-top: 4px; }
+.results .results-table.as-cards tr.apartment-row > td.c-approved { grid-area: date; justify-self: end; color: #8a83a0; font-size: 12px; white-space: nowrap; }
+.results .results-table.as-cards tr.apartment-row > td.c-price { grid-area: price; justify-self: end; align-self: center; text-align: right; font-size: 19px; line-height: 1.25; padding-left: 18px; border-left: 1px solid #f0edf5; }
+.results .results-table.as-cards tr.apartment-row > td.c-price .sale-price-tag { margin-top: 4px; font-size: 12.5px; }
+
+.results .results-table.as-cards tr.apartment-row > td.c-rooms { grid-area: rooms; }
+.results .results-table.as-cards tr.apartment-row > td.c-bedrooms { grid-area: bedrooms; }
+.results .results-table.as-cards tr.apartment-row > td.c-area { grid-area: area; }
+.results .results-table.as-cards tr.apartment-row > td.c-floor { grid-area: floor; }
+.results .results-table.as-cards tr.apartment-row > td.c-rooms,
+.results .results-table.as-cards tr.apartment-row > td.c-bedrooms,
+.results .results-table.as-cards tr.apartment-row > td.c-area,
+.results .results-table.as-cards tr.apartment-row > td.c-floor {
+  justify-self: start; padding: 6px 11px; border-radius: 999px; background: #f4f1fa; color: #2c2640; font-size: 12.5px; font-weight: 700; white-space: nowrap;
+}
+.results .results-table.as-cards tr.apartment-row > td.c-rooms::after { content: ' ოთახი'; font-weight: 500; color: #7a748c; }
+.results .results-table.as-cards tr.apartment-row > td.c-bedrooms::after { content: ' საძინებელი'; font-weight: 500; color: #7a748c; }
+.results .results-table.as-cards tr.apartment-row > td.c-floor::after { content: ' სართული'; font-weight: 500; color: #7a748c; }
+
+.results .results-table.as-cards tr.apartment-row > td.c-assigned-agent { grid-area: agent; }
+.results .results-table.as-cards tr.apartment-row > td.c-assigned-agent .agent-reassign { width: 100%; max-width: 260px; min-width: 0; }
+.results .results-table.as-cards tr.apartment-row > td.c-phone { grid-area: phone; font-weight: 700; white-space: nowrap; }
+.results .results-table.as-cards tr.apartment-row > td.c-link { grid-area: link; justify-self: end; }
+.results .results-table.as-cards tr.apartment-row > td.c-website { grid-area: actions; justify-self: start; }
+.results .results-table.as-cards tr.apartment-row > td.c-review { grid-area: actions; justify-self: end; margin-left: 96px; }
+
+.results .results-table.as-cards tr.apartment-row > td.c-accepted-by { grid-area: acc; display: flex; align-items: baseline; gap: 8px; padding-top: 12px; border-top: 1px solid #f0edf5; color: #5b5470; font-size: 12.5px; }
+.results .results-table.as-cards tr.apartment-row > td.c-accepted-by::before { content: 'Accepted by'; display: inline; margin: 0; color: #9a94ab; font-size: 11px; font-weight: 600; letter-spacing: 0; text-transform: none; }
+.results .results-table.as-cards tr.apartment-row > td.c-comment { grid-area: note; padding: 12px 14px; border-radius: 10px; background: #faf8fd; }
+.results .results-table.as-cards tr.apartment-row > td.c-comment .accepted-note { margin: 0 0 6px; line-height: 1.5; }
+
+.results-table td.accepted-agent small { display: none; }
+.results-table:not(.as-cards) td.management-comment { min-width: 180px; }
+
+@media (max-width: 760px) {
+  .results .results-table.as-cards tr.apartment-row {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-areas:
+      "id       price"
+      "district date"
+      "rooms    bedrooms"
+      "area     floor"
+      "agent    agent"
+      "phone    link"
+      "actions  actions"
+      "acc      acc"
+      "note     note";
+    padding: 16px;
+  }
+  .results .results-table.as-cards tr.apartment-row > td.c-price { padding-left: 0; border-left: 0; font-size: 17px; }
+  .results .results-table.as-cards tr.apartment-row > td.c-assigned-agent .agent-reassign { max-width: none; }
+}
+.results .results-table.as-cards tr.apartment-row > td.c-comment, .results .results-table.as-cards tr.apartment-row > td.c-comment .accepted-note { justify-self: stretch; width: auto; max-width: none; }
