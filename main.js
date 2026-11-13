@@ -749,7 +749,7 @@ function buildTeamContent(items, agents) {
       <span class="agent-avatar">${html(agent.name.slice(0, 1).toUpperCase() || '?')}</span>
       <span class="agent-profile-copy"><strong>${html(agent.name)}</strong><small>${waiting} waiting · ${ready} ready · ${uploaded} uploaded</small></span>
       <span class="agent-profile-total">${assigned.length}<small>total</small></span>
-      <span class="agent-profile-actions"><a href="/?view=all&agent=${encodeURIComponent(agent.id)}">Apartments</a><a href="/?view=owners&agent=${encodeURIComponent(agent.id)}">Owners</a></span>
+      <span class="agent-profile-actions"><a href="/?view=all&agent=${encodeURIComponent(agent.id)}">Apartments</a><a href="/?view=accepted&agent=${encodeURIComponent(agent.id)}">Ready For Upload</a><a href="/?view=owners&agent=${encodeURIComponent(agent.id)}">Owners</a></span>
     </div>`;
   }).join('');
   return `<section class="team-panel"><div class="team-heading"><div><p class="eyebrow">Apartment ownership</p><h2>Team profiles</h2><p>Open a profile to see every apartment assigned to that person.</p></div></div><div class="agent-profile-grid">${cards || '<div class="empty">No agent profiles are available yet.</div>'}</div></section>`;
@@ -780,9 +780,6 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
       String(item.assigned_agent_id || '') === String(viewer.agentId || '') &&
       (view === 'accepted' ? item._review_status === 'accepted' : item._review_status !== 'accepted')
     );
-  } else if (selectedAgentId && ['admin', 'manager'].includes(viewer?.role)) {
-    // A management profile intentionally shows the agent's complete queue:
-    // waiting, ready for upload, and already uploaded apartments together.
   } else if (view === 'accepted') {
     combined = combined.filter(item => item._review_status === 'accepted');
   } else {
@@ -798,7 +795,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
   const selectedOwner = view === 'owners' && selectedAgent && ['admin', 'manager'].includes(viewer?.role)
     ? { role: 'agent', agentId: selectedAgent.id, email: selectedAgent.email, name: selectedAgent.name }
     : null;
-  const showManagementComments = view === 'accepted' || Boolean(selectedAgentId && ['admin', 'manager'].includes(viewer?.role));
+  const showManagementComments = view === 'accepted';
   const canReassign = ['admin', 'manager'].includes(viewer?.role);
   const canSelectTransfer = canReassign && Boolean(selectedAgent);
   const assignmentOptions = item => {
