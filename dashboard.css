@@ -1049,7 +1049,11 @@ button:disabled, input:disabled, select:disabled { cursor: not-allowed; opacity:
 .results .results-table.as-cards tr.apartment-row:hover { border-color: #cdbfe6; box-shadow: 0 6px 18px rgba(69, 26, 143, .08); }
 .results .results-table.as-cards tr.apartment-row > td { display: block; padding: 0; border: 0; background: transparent; }
 .results .results-table.as-cards tr.apartment-row > td::before { display: none; }
-.results .results-table.as-cards tr.apartment-row > td.c-select { display: none; }
+.results .results-table.as-cards tr.apartment-row { position: relative; }
+.results .results-table.as-cards tr.apartment-row:has(> td.c-select input) { padding-left: 52px; }
+.results .results-table.as-cards tr.apartment-row > td.c-select { position: absolute; top: 22px; left: 18px; }
+.results .results-table.as-cards tr.apartment-row > td.c-select:not(:has(input)) { display: none; }
+.results-table .transfer-apartment-checkbox, #select-all-apartments { width: 18px; height: 18px; accent-color: #451a8f; cursor: pointer; }
 .results .results-table.as-cards tr.apartment-row > td.c-source { display: none; }
 
 .results .results-table.as-cards tr.apartment-row > td.c-id { grid-area: id; font-size: 17px; }
