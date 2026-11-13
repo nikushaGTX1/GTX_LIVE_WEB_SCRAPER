@@ -1704,8 +1704,11 @@ function startWebServer() {
       }
       return;
     }
-    if ((pathname === '/' || pathname === '/live-results.html') && request.method === 'GET' && !(websiteDirectoryAgents || []).length) {
-      await Promise.race([getDistributionAgents().catch(() => []), new Promise(resolve => setTimeout(resolve, 4000))]);
+    if ((pathname === '/' || pathname === '/live-results.html') && request.method === 'GET' && !(websiteDirectoryAgents || []).length && Date.now() - agentDirectoryTriedAt > 60_000) {
+      // At most one on-demand agent load per minute, shared by concurrent page views.
+      agentDirectoryTriedAt = Date.now();
+      agentDirectoryLoad ||= getDistributionAgents().catch(() => []).finally(() => { agentDirectoryLoad = null; });
+      await Promise.race([agentDirectoryLoad, new Promise(resolve => setTimeout(resolve, 4000))]);
     }
     if ((pathname === '/' || pathname === '/live-results.html') && request.method === 'GET') {
       const requested = requestUrl.searchParams.get('view');
@@ -2565,6 +2568,8 @@ function districtFromListingUrl(value) {
 // profiles and assignment keep working. In that mode nobody is unassigned
 // as "inactive": the public list might use different IDs.
 let agentsFromPublicList = false;
+let agentDirectoryTriedAt = 0;
+let agentDirectoryLoad = null;
 async function publicWebsiteAgents() {
   const response = await fetch(`${WEBSITE_API_URL}/api/Agents`, { signal: AbortSignal.timeout(20000) });
   if (!response.ok) throw new Error(`Website API public agent list returned HTTP ${response.status}`);
