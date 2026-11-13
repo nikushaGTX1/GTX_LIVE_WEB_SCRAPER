@@ -40,7 +40,7 @@ function run(rows, { role = 'admin', district, propertyType, dealType, existingD
       apartment_id: id, owner_id: String(row.user_id || ''), phone: phone || '', district,
       title: row.dynamic_title || '', description: row.comment || ''
     }),
-    assignPendingApartments: async () => { assigned += 1; return 0; },
+    assignAllPendingApartments: async () => { assigned += 1; return 0; },
     loadState: () => ({}),
     saveData: d => saves.push(JSON.parse(JSON.stringify(d))),
     clean: value => String(value ?? '').trim(),

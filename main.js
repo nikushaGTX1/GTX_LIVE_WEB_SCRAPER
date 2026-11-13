@@ -859,7 +859,11 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
   if (!fs.existsSync(DASHBOARD_TEMPLATE_PATH)) {
     throw new Error(`Dashboard template is missing: ${DASHBOARD_TEMPLATE_PATH}`);
   }
-  const acceptedSearch = `<div class="table-search" role="search"><label for="table-search-input">Search apartments</label><input id="table-search-input" type="search" placeholder="Search ID, district, agent, phone..." autocomplete="off" data-search-table=".results-table" data-search-rows="tbody .apartment-row"><span id="table-search-status" aria-live="polite"></span></div>`;
+  const unassignedCount = combined.filter(item => !item.assigned_agent_id && item._review_status !== 'accepted').length;
+  const assignmentBanner = ['admin', 'manager'].includes(viewer?.role) && assignmentError && unassignedCount
+    ? `<div class="assignment-warning" role="alert"><strong>${unassignedCount} apartment(s) are not assigned to an agent.</strong> Automatic assignment failed: ${html(assignmentError.message)}. It retries every 5 minutes.</div>`
+    : '';
+  const acceptedSearch = `${assignmentBanner}<div class="table-search" role="search"><label for="table-search-input">Search apartments</label><input id="table-search-input" type="search" placeholder="Search ID, district, agent, phone..." autocomplete="off" data-search-table=".results-table" data-search-rows="tbody .apartment-row"><span id="table-search-status" aria-live="polite"></span></div>`;
   const bulkTargets = selectedAgent ? assignableAgents.filter(agent => agent.id !== selectedAgent.id) : [];
   const profileBanner = selectedAgent ? `<div class="profile-filter-banner">
     <span>Showing <strong>${html(selectedAgent.name)}</strong>'s apartments</span>
@@ -1573,7 +1577,7 @@ function startWebServer() {
           imported += 1;
         }
         if (imported || filteredOwner || filteredDescription || pricesFixed) saveData(data);
-        if (imported) await assignPendingApartments(data, loadState());
+        if (imported) await assignAllPendingApartments();
         response.writeHead(200, { 'content-type': 'application/json; charset=utf-8' });
         response.end(JSON.stringify({ ok: true, imported, duplicates, permanentlyDismissed, filteredOwner, filteredDescription, invalid, pricesFixed }));
       } catch (error) {
@@ -2584,9 +2588,31 @@ async function hydrateAssignedAgentNames(data) {
   return updated;
 }
 
+// Last automatic-assignment failure, shown to admins on the dashboard so
+// apartments never sit "Unassigned" silently.
+let assignmentError = null;
+
+// Assigns waiting apartments of both sources; records any failure instead of
+// throwing, so imports still succeed and the next run can try again.
+async function assignAllPendingApartments() {
+  try {
+    const state = loadState();
+    const assigned = await assignPendingApartments(liveMyHomeData || loadData(), state) +
+      await assignPendingApartments(liveSsData || loadSsData(), state, SS_DATA_PATH, SS_CSV_PATH);
+    assignmentError = null;
+    if (assigned) console.log(`Assigned ${assigned} pending apartment(s) to agents.`);
+    return assigned;
+  } catch (error) {
+    assignmentError = { message: error.message, at: new Date().toISOString() };
+    console.error(`Automatic agent assignment failed: ${error.message}`);
+    return 0;
+  }
+}
+
 async function assignPendingApartments(data, state, dataPath = DATA_PATH, csvPath = CSV_PATH) {
   if (!process.env.WEBSITE_API_EMAIL || !process.env.WEBSITE_API_PASSWORD) return 0;
   const agents = await getDistributionAgents();
+  if (!agents.length) throw new Error('No active agents were returned by the Website API');
   const activeAgentIds = new Set(agents.map(agent => String(agent.id)));
   let released = 0;
   for (const item of Object.values(data)) {
@@ -3074,6 +3100,8 @@ async function main() {
   liveMyHomeData = data;
   liveSsData = ssData;
   refreshSaleUsdPrices().catch(error => console.error(`Sale USD conversion failed: ${error.message}`));
+  // Unassigned apartments are retried every 5 minutes, not only on restart.
+  setInterval(() => { assignAllPendingApartments(); }, 5 * 60 * 1000).unref?.();
   setInterval(() => refreshSaleUsdPrices().catch(() => {}), 6 * 60 * 60 * 1000).unref?.();
   const state = loadState();
   for (const [source, sourceData] of [['MyHome', data], ['SS.ge', ssData]]) {
