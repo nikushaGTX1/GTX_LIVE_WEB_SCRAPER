@@ -752,7 +752,7 @@ function buildTeamContent(items, agents) {
       <span class="agent-profile-actions"><a href="/?view=all&agent=${encodeURIComponent(agent.id)}">Apartments</a><a href="/?view=accepted&agent=${encodeURIComponent(agent.id)}">Ready For Upload</a><a href="/?view=owners&agent=${encodeURIComponent(agent.id)}">Owners</a></span>
     </div>`;
   }).join('');
-  return `<section class="team-panel"><div class="team-heading"><div><p class="eyebrow">Apartment ownership</p><h2>Team profiles</h2><p>Open a profile to see every apartment assigned to that person.</p></div></div><div class="agent-profile-grid">${cards || `<div class="empty">${websiteApiLoginError ? `<strong>The dashboard cannot log in to the website API (HTTP ${websiteApiLoginError.status}).</strong> Agents load from that login, so profiles and automatic assignment stop. Update <code>WEBSITE_API_EMAIL</code> / <code>WEBSITE_API_PASSWORD</code> in Railway to the website account that still works, then redeploy.` : 'No agent profiles are available yet.'}</div>`}</div></section>`;
+  return `<section class="team-panel"><div class="team-heading"><div><p class="eyebrow">Apartment ownership</p><h2>Team profiles</h2><p>Open a profile to see every apartment assigned to that person.</p></div></div>${websiteApiLoginError ? `<p class="assignment-warning">The dashboard's website API login is rejected (HTTP ${websiteApiLoginError.status}), so agents load from the website's public list. Uploading apartments to the website still needs that login: update <code>WEBSITE_API_EMAIL</code> / <code>WEBSITE_API_PASSWORD</code> in Railway.</p>` : ''}<div class="agent-profile-grid">${cards || `<div class="empty">${websiteApiLoginError ? `<strong>The dashboard cannot log in to the website API (HTTP ${websiteApiLoginError.status}).</strong> Agents load from that login, so profiles and automatic assignment stop. Update <code>WEBSITE_API_EMAIL</code> / <code>WEBSITE_API_PASSWORD</code> in Railway to the website account that still works, then redeploy.` : 'No agent profiles are available yet.'}</div>`}</div></section>`;
 }
 
 // An apartment a person accepted is Ready For Upload for good: the automatic
@@ -1704,6 +1704,9 @@ function startWebServer() {
       }
       return;
     }
+    if ((pathname === '/' || pathname === '/live-results.html') && request.method === 'GET' && !(websiteDirectoryAgents || []).length) {
+      await Promise.race([getDistributionAgents().catch(() => []), new Promise(resolve => setTimeout(resolve, 4000))]);
+    }
     if ((pathname === '/' || pathname === '/live-results.html') && request.method === 'GET') {
       const requested = requestUrl.searchParams.get('view');
       const requestedView = ['owners', 'accepted', 'team'].includes(requested) ? requested : 'all';
@@ -2557,9 +2560,28 @@ function districtFromListingUrl(value) {
 // Restored 2026-09-16: apartments must never sit Unassigned - every agent
 // gets a share of the pending queue in round-robin order. The status text
 // that used to announce this in the admin panel is intentionally not shown.
+// The website lists its agents publicly too. When the dashboard's own
+// login is rejected, agents still load from that public list so Team
+// profiles and assignment keep working. In that mode nobody is unassigned
+// as "inactive": the public list might use different IDs.
+let agentsFromPublicList = false;
+async function publicWebsiteAgents() {
+  const response = await fetch(`${WEBSITE_API_URL}/api/Agents`, { signal: AbortSignal.timeout(20000) });
+  if (!response.ok) throw new Error(`Website API public agent list returned HTTP ${response.status}`);
+  return response.json();
+}
+
 async function getDistributionAgents() {
-  if (!websiteApiToken && !await loginWebsiteApi()) return [];
-  const payload = await websiteApiRequest('/api/Agents');
+  let payload;
+  try {
+    if (!websiteApiToken && !await loginWebsiteApi()) return [];
+    payload = await websiteApiRequest('/api/Agents');
+    agentsFromPublicList = false;
+  } catch (error) {
+    if (!websiteApiLoginError) throw error;
+    payload = await publicWebsiteAgents();
+    agentsFromPublicList = true;
+  }
   const available = responseItems(payload)
     .map(agent => ({ ...agent, id: String(agent.userId ?? agent.user_id ?? agent.user?.id ?? agent.id ?? '') }))
     .filter(agent => agent.id && isAssignableApiAgent(agent))
@@ -2627,7 +2649,7 @@ async function assignPendingApartments(data, state, dataPath = DATA_PATH, csvPat
     const assignedId = String(item.assigned_agent_id || '');
     const stillPending = !item._baseline && !item._excluded && !['accepted', 'rejected'].includes(item._review_status) &&
       !item._api_uploaded && !(item._listing_uploads || []).length;
-    if (!assignedId || activeAgentIds.has(assignedId) || !stillPending) continue;
+    if (agentsFromPublicList || !assignedId || activeAgentIds.has(assignedId) || !stillPending) continue;
     item._previous_inactive_agent_id = assignedId;
     item._previous_inactive_agent_name = item.assigned_agent_name || '';
     delete item.assigned_agent_id;
