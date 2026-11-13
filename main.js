@@ -752,7 +752,7 @@ function buildTeamContent(items, agents) {
       <span class="agent-profile-actions"><a href="/?view=all&agent=${encodeURIComponent(agent.id)}">Apartments</a><a href="/?view=accepted&agent=${encodeURIComponent(agent.id)}">Ready For Upload</a><a href="/?view=owners&agent=${encodeURIComponent(agent.id)}">Owners</a></span>
     </div>`;
   }).join('');
-  return `<section class="team-panel"><div class="team-heading"><div><p class="eyebrow">Apartment ownership</p><h2>Team profiles</h2><p>Open a profile to see every apartment assigned to that person.</p></div></div><div class="agent-profile-grid">${cards || '<div class="empty">No agent profiles are available yet.</div>'}</div></section>`;
+  return `<section class="team-panel"><div class="team-heading"><div><p class="eyebrow">Apartment ownership</p><h2>Team profiles</h2><p>Open a profile to see every apartment assigned to that person.</p></div></div><div class="agent-profile-grid">${cards || `<div class="empty">${websiteApiLoginError ? `<strong>The dashboard cannot log in to the website API (HTTP ${websiteApiLoginError.status}).</strong> Agents load from that login, so profiles and automatic assignment stop. Update <code>WEBSITE_API_EMAIL</code> / <code>WEBSITE_API_PASSWORD</code> in Railway to the website account that still works, then redeploy.` : 'No agent profiles are available yet.'}</div>`}</div></section>`;
 }
 
 // An apartment a person accepted is Ready For Upload for good: the automatic
@@ -861,7 +861,7 @@ function buildDashboard(viewer = null, view = 'all', selectedAgentId = '', owner
   }
   const unassignedCount = combined.filter(item => !item.assigned_agent_id && item._review_status !== 'accepted').length;
   const assignmentBanner = ['admin', 'manager'].includes(viewer?.role) && assignmentError && unassignedCount
-    ? `<div class="assignment-warning" role="alert"><strong>${unassignedCount} apartment(s) are not assigned to an agent.</strong> Automatic assignment failed: ${html(assignmentError.message)}. It retries every 5 minutes.</div>`
+    ? `<div class="assignment-warning" role="alert"><strong>${unassignedCount} apartment(s) are not assigned to an agent.</strong> Automatic assignment failed: ${html(assignmentError.message)}.${websiteApiLoginError ? ' Update WEBSITE_API_EMAIL / WEBSITE_API_PASSWORD in Railway.' : ''} It retries every 5 minutes.</div>`
     : '';
   const acceptedSearch = `${assignmentBanner}<div class="table-search" role="search"><label for="table-search-input">Search apartments</label><input id="table-search-input" type="search" placeholder="Search ID, district, agent, phone..." autocomplete="off" data-search-table=".results-table" data-search-rows="tbody .apartment-row"><span id="table-search-status" aria-live="polite"></span></div>`;
   const bulkTargets = selectedAgent ? assignableAgents.filter(agent => agent.id !== selectedAgent.id) : [];
@@ -2521,6 +2521,10 @@ async function websiteApiRequest(pathname, options = {}, retry = true) {
   return text ? JSON.parse(text) : {};
 }
 
+// Set while the dashboard cannot log in to the website API; without that
+// login it knows no agents (empty Team profiles, nothing gets assigned).
+let websiteApiLoginError = null;
+
 async function loginWebsiteApi() {
   const email = process.env.WEBSITE_API_EMAIL;
   const password = process.env.WEBSITE_API_PASSWORD;
@@ -2530,7 +2534,11 @@ async function loginWebsiteApi() {
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ email, password })
   });
-  if (!response.ok) throw new Error(`Website API login returned HTTP ${response.status}`);
+  if (!response.ok) {
+    websiteApiLoginError = { status: response.status, at: new Date().toISOString() };
+    throw new Error(`Website API login returned HTTP ${response.status}`);
+  }
+  websiteApiLoginError = null;
   const payload = await response.json();
   websiteApiToken = tokenFromPayload(payload);
   if (!websiteApiToken) throw new Error('Website API login response did not contain a bearer token');
